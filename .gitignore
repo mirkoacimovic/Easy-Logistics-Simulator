@@ -1,0 +1,11 @@
+# .gitignore
+[Bb]in/
+[Oo]bj/
+.vs/
+.vscode/
+*.user
+*.suo
+__pycache__/
+*.pyc
+*.pyo
+.env
