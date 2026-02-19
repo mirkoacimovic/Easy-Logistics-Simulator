@@ -11,6 +11,7 @@ using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
 
+
 // 1. Core Services (Singletons - The "Source of Truth")
 builder.Services.AddSingleton<IFleetStateService, FleetStateService>();
 builder.Services.AddSingleton<IFleetBridge, MemoryMappedBridge>();
@@ -52,6 +53,7 @@ if (!app.Environment.IsDevelopment())
     // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
     app.UseHsts();
 }
+
 
 app.UseHttpsRedirection();
 

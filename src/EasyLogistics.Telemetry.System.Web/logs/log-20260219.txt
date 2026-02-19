@@ -368,3 +368,85 @@
 2026-02-19 20:49:39.419 +01:00 [INF] Connection id "0HNJFTU5TR6D5", Request id "0HNJFTU5TR6D5:00000017": the application completed without reading the entire request body.
 2026-02-19 20:49:39.420 +01:00 [INF] Executed endpoint 'Microsoft.AspNetCore.Routing.RouteEndpoint'
 2026-02-19 20:49:39.423 +01:00 [INF] Request finished HTTP/2 POST https://localhost:7000/_blazor/disconnect - 200 0 null 79.4097ms
+2026-02-19 21:39:04.044 +01:00 [INF] User profile is available. Using 'C:\Users\macim\AppData\Local\ASP.NET\DataProtection-Keys' as key repository and Windows DPAPI to encrypt keys at rest.
+2026-02-19 21:40:06.649 +01:00 [INF] User profile is available. Using 'C:\Users\macim\AppData\Local\ASP.NET\DataProtection-Keys' as key repository and Windows DPAPI to encrypt keys at rest.
+2026-02-19 21:42:01.634 +01:00 [INF] User profile is available. Using 'C:\Users\macim\AppData\Local\ASP.NET\DataProtection-Keys' as key repository and Windows DPAPI to encrypt keys at rest.
+2026-02-19 21:44:41.201 +01:00 [INF] User profile is available. Using 'C:\Users\macim\AppData\Local\ASP.NET\DataProtection-Keys' as key repository and Windows DPAPI to encrypt keys at rest.
+2026-02-19 21:47:10.447 +01:00 [INF] User profile is available. Using 'C:\Users\macim\AppData\Local\ASP.NET\DataProtection-Keys' as key repository and Windows DPAPI to encrypt keys at rest.
+2026-02-19 21:47:36.475 +01:00 [INF] User profile is available. Using 'C:\Users\macim\AppData\Local\ASP.NET\DataProtection-Keys' as key repository and Windows DPAPI to encrypt keys at rest.
+2026-02-19 21:49:16.216 +01:00 [INF] User profile is available. Using 'C:\Users\macim\AppData\Local\ASP.NET\DataProtection-Keys' as key repository and Windows DPAPI to encrypt keys at rest.
+2026-02-19 21:58:15.242 +01:00 [INF] User profile is available. Using 'C:\Users\macim\AppData\Local\ASP.NET\DataProtection-Keys' as key repository and Windows DPAPI to encrypt keys at rest.
+2026-02-19 21:58:16.341 +01:00 [INF] Now listening on: https://localhost:7000
+2026-02-19 21:58:16.342 +01:00 [INF] Now listening on: http://localhost:5289
+2026-02-19 21:58:16.367 +01:00 [INF] No action descriptors found. This may indicate an incorrectly configured application or missing application parts. To learn more, visit https://aka.ms/aspnet/mvc/app-parts
+2026-02-19 21:58:16.458 +01:00 [INF] Application started. Press Ctrl+C to shut down.
+2026-02-19 21:58:16.460 +01:00 [INF] Hosting environment: Development
+2026-02-19 21:58:16.461 +01:00 [INF] Content root path: C:\Users\macim\FinalProject\EasyLogistics\src\EasyLogistics.Telemetry.System.Web
+2026-02-19 21:58:19.234 +01:00 [INF] Request starting HTTP/2 GET https://localhost:7000/ - null null
+2026-02-19 21:58:19.548 +01:00 [INF] Executing endpoint '/ (/)'
+2026-02-19 21:58:19.839 +01:00 [INF] Request starting HTTP/2 POST https://localhost:7000/fleethub/negotiate?negotiateVersion=1 - null 0
+2026-02-19 21:58:19.845 +01:00 [INF] Executing endpoint '/fleethub/negotiate'
+2026-02-19 21:58:19.863 +01:00 [INF] Executed endpoint '/fleethub/negotiate'
+2026-02-19 21:58:19.865 +01:00 [INF] Request finished HTTP/2 POST https://localhost:7000/fleethub/negotiate?negotiateVersion=1 - 200 316 application/json 27.0287ms
+2026-02-19 21:58:19.912 +01:00 [INF] Request starting HTTP/1.1 GET https://localhost:7000/fleethub?id=4aLyCuJJ97xanTt8ESpYtg - null null
+2026-02-19 21:58:19.921 +01:00 [INF] Executing endpoint '/fleethub'
+2026-02-19 21:58:20.110 +01:00 [INF] Executed endpoint '/ (/)'
+2026-02-19 21:58:20.120 +01:00 [INF] Request finished HTTP/2 GET https://localhost:7000/ - 200 null text/html; charset=utf-8 899.6458ms
+2026-02-19 21:58:20.147 +01:00 [INF] Request starting HTTP/2 GET https://localhost:7000/lib/bootstrap/dist/css/bootstrap.min.46ein0sx1k.css - null null
+2026-02-19 21:58:20.147 +01:00 [INF] Request starting HTTP/2 GET https://localhost:7000/EasyLogistics.Telemetry.System.Web.65w3pzvz9h.styles.css - null null
+2026-02-19 21:58:20.147 +01:00 [INF] Request starting HTTP/2 GET https://localhost:7000/app.khy4lop6wu.css - null null
+2026-02-19 21:58:20.147 +01:00 [INF] Request starting HTTP/2 GET https://localhost:7000/js/mapInterop.js - null null
+2026-02-19 21:58:20.157 +01:00 [INF] Executing endpoint 'Microsoft.AspNetCore.Routing.RouteEndpoint'
+2026-02-19 21:58:20.154 +01:00 [INF] Executing endpoint 'Microsoft.AspNetCore.Routing.RouteEndpoint'
+2026-02-19 21:58:20.163 +01:00 [INF] Request starting HTTP/2 GET https://localhost:7000/_framework/aspnetcore-browser-refresh.js - null null
+2026-02-19 21:58:20.156 +01:00 [INF] Request starting HTTP/2 GET https://localhost:7000/_vs/browserLink - null null
+2026-02-19 21:58:20.174 +01:00 [INF] Executing endpoint 'Microsoft.AspNetCore.Routing.RouteEndpoint'
+2026-02-19 21:58:20.154 +01:00 [INF] Executing endpoint 'Microsoft.AspNetCore.Routing.RouteEndpoint'
+2026-02-19 21:58:20.165 +01:00 [INF] Request starting HTTP/2 GET https://localhost:7000/_framework/blazor.web.js - null null
+2026-02-19 21:58:20.193 +01:00 [INF] Request finished HTTP/2 GET https://localhost:7000/_framework/aspnetcore-browser-refresh.js - 200 16553 application/javascript; charset=utf-8 29.8316ms
+2026-02-19 21:58:20.207 +01:00 [INF] Executing endpoint 'Blazor web static files'
+2026-02-19 21:58:20.229 +01:00 [INF] The file /_framework/blazor.web.js was not modified
+2026-02-19 21:58:20.231 +01:00 [INF] Executed endpoint 'Blazor web static files'
+2026-02-19 21:58:20.233 +01:00 [INF] Request finished HTTP/2 GET https://localhost:7000/_framework/blazor.web.js - 304 null text/javascript 69.476ms
+2026-02-19 21:58:20.242 +01:00 [INF] Sending file. Request path: 'app.khy4lop6wu.css'. Physical path: 'C:\Users\macim\FinalProject\EasyLogistics\src\EasyLogistics.Telemetry.System.Web\obj\Debug\net9.0\compressed\i7by9uahwe-khy4lop6wu.gz'
+2026-02-19 21:58:20.242 +01:00 [INF] Sending file. Request path: 'EasyLogistics.Telemetry.System.Web.65w3pzvz9h.styles.css'. Physical path: 'C:\Users\macim\FinalProject\EasyLogistics\src\EasyLogistics.Telemetry.System.Web\obj\Debug\net9.0\compressed\6mjf7oxtmh-65w3pzvz9h.gz'
+2026-02-19 21:58:20.242 +01:00 [INF] Sending file. Request path: 'js/mapInterop.js'. Physical path: 'C:\Users\macim\FinalProject\EasyLogistics\src\EasyLogistics.Telemetry.System.Web\obj\Debug\net9.0\compressed\v2woj4xmrk-y0esibjamr.gz'
+2026-02-19 21:58:20.243 +01:00 [INF] Sending file. Request path: 'lib/bootstrap/dist/css/bootstrap.min.46ein0sx1k.css'. Physical path: 'C:\Users\macim\FinalProject\EasyLogistics\src\EasyLogistics.Telemetry.System.Web\obj\Debug\net9.0\compressed\1qi8h6w6mc-46ein0sx1k.gz'
+2026-02-19 21:58:20.244 +01:00 [INF] Executed endpoint 'Microsoft.AspNetCore.Routing.RouteEndpoint'
+2026-02-19 21:58:20.246 +01:00 [INF] Executed endpoint 'Microsoft.AspNetCore.Routing.RouteEndpoint'
+2026-02-19 21:58:20.248 +01:00 [INF] Executed endpoint 'Microsoft.AspNetCore.Routing.RouteEndpoint'
+2026-02-19 21:58:20.250 +01:00 [INF] Executed endpoint 'Microsoft.AspNetCore.Routing.RouteEndpoint'
+2026-02-19 21:58:20.251 +01:00 [INF] Request finished HTTP/2 GET https://localhost:7000/app.khy4lop6wu.css - 200 2933 text/css 103.6923ms
+2026-02-19 21:58:20.252 +01:00 [INF] Request finished HTTP/2 GET https://localhost:7000/EasyLogistics.Telemetry.System.Web.65w3pzvz9h.styles.css - 200 6048 text/css 104.8005ms
+2026-02-19 21:58:20.254 +01:00 [INF] Request finished HTTP/2 GET https://localhost:7000/js/mapInterop.js - 200 2843 text/javascript 106.1445ms
+2026-02-19 21:58:20.255 +01:00 [INF] Request finished HTTP/2 GET https://localhost:7000/lib/bootstrap/dist/css/bootstrap.min.46ein0sx1k.css - 200 232871 text/css 107.9925ms
+2026-02-19 21:58:20.305 +01:00 [INF] Request finished HTTP/2 GET https://localhost:7000/_vs/browserLink - 200 null text/javascript; charset=UTF-8 148.9633ms
+2026-02-19 21:58:20.416 +01:00 [INF] Request starting HTTP/2 GET https://localhost:7000/_blazor/initializers - null null
+2026-02-19 21:58:20.425 +01:00 [INF] Executing endpoint 'Microsoft.AspNetCore.Routing.RouteEndpoint'
+2026-02-19 21:58:20.431 +01:00 [INF] Executed endpoint 'Microsoft.AspNetCore.Routing.RouteEndpoint'
+2026-02-19 21:58:20.433 +01:00 [INF] Request finished HTTP/2 GET https://localhost:7000/_blazor/initializers - 200 null application/json; charset=utf-8 16.3548ms
+2026-02-19 21:58:20.472 +01:00 [INF] Request starting HTTP/2 POST https://localhost:7000/_blazor/negotiate?negotiateVersion=1 - null 0
+2026-02-19 21:58:20.495 +01:00 [INF] Executing endpoint 'Microsoft.AspNetCore.Routing.RouteEndpoint'
+2026-02-19 21:58:20.497 +01:00 [INF] Executed endpoint 'Microsoft.AspNetCore.Routing.RouteEndpoint'
+2026-02-19 21:58:20.510 +01:00 [INF] Request finished HTTP/2 POST https://localhost:7000/_blazor/negotiate?negotiateVersion=1 - 200 316 application/json 38.1487ms
+2026-02-19 21:58:20.540 +01:00 [INF] Request starting HTTP/2 CONNECT https://localhost:7000/_blazor?id=9k0EuE_JIclLubZix8Gp1Q - null null
+2026-02-19 21:58:20.575 +01:00 [INF] Executing endpoint 'Microsoft.AspNetCore.Routing.RouteEndpoint'
+2026-02-19 21:58:29.746 +01:00 [INF] Request starting HTTP/2 GET https://localhost:7000/fleet-map - null null
+2026-02-19 21:58:29.755 +01:00 [INF] Executing endpoint '/fleet-map (/fleet-map)'
+2026-02-19 21:58:29.774 +01:00 [INF] Executed endpoint '/fleet-map (/fleet-map)'
+2026-02-19 21:58:29.776 +01:00 [INF] Request finished HTTP/2 GET https://localhost:7000/fleet-map - 200 null text/html; charset=utf-8 30.0652ms
+2026-02-19 21:59:40.687 +01:00 [INF] Request starting HTTP/2 GET https://localhost:7000/ - null null
+2026-02-19 21:59:40.694 +01:00 [INF] Executing endpoint '/ (/)'
+2026-02-19 21:59:40.702 +01:00 [INF] Executed endpoint '/ (/)'
+2026-02-19 21:59:40.704 +01:00 [INF] Request finished HTTP/2 GET https://localhost:7000/ - 200 null text/html; charset=utf-8 17.0958ms
+2026-02-19 21:59:47.528 +01:00 [INF] Request starting HTTP/2 GET https://localhost:7000/fleet-map - null null
+2026-02-19 21:59:47.534 +01:00 [INF] Executing endpoint '/fleet-map (/fleet-map)'
+2026-02-19 21:59:47.537 +01:00 [INF] Executed endpoint '/fleet-map (/fleet-map)'
+2026-02-19 21:59:47.539 +01:00 [INF] Request finished HTTP/2 GET https://localhost:7000/fleet-map - 200 null text/html; charset=utf-8 11.3242ms
+2026-02-19 22:00:09.608 +01:00 [INF] Executed endpoint 'Microsoft.AspNetCore.Routing.RouteEndpoint'
+2026-02-19 22:00:09.613 +01:00 [INF] Request finished HTTP/2 CONNECT https://localhost:7000/_blazor?id=9k0EuE_JIclLubZix8Gp1Q - 200 null null 109072.8815ms
+2026-02-19 22:00:09.620 +01:00 [INF] Connection id "0HNJFV6DC01RP", Request id "0HNJFV6DC01RP:00000017": the application completed without reading the entire request body.
+2026-02-19 22:00:09.651 +01:00 [INF] Request starting HTTP/2 POST https://localhost:7000/_blazor/disconnect - multipart/form-data; boundary=----geckoformboundary7c41c9ea244bbb3e26ed8da1a81ab7a5 389
+2026-02-19 22:00:09.654 +01:00 [INF] Executing endpoint 'Microsoft.AspNetCore.Routing.RouteEndpoint'
+2026-02-19 22:00:09.678 +01:00 [INF] Executed endpoint 'Microsoft.AspNetCore.Routing.RouteEndpoint'
+2026-02-19 22:00:09.680 +01:00 [INF] Request finished HTTP/2 POST https://localhost:7000/_blazor/disconnect - 200 0 null 29.5161ms

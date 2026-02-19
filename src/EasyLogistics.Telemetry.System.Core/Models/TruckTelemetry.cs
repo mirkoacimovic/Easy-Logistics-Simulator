@@ -2,6 +2,7 @@
 
 namespace EasyLogistics.Telemetry.System.Core.Models;
 
+
 [StructLayout(LayoutKind.Explicit, Size = 36)] // Force total size to match Python 36 bytes
 public struct TruckTelemetry
 {
