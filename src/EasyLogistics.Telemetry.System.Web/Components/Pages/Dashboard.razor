@@ -1,0 +1,61 @@
+﻿@page "/"
+@using EasyLogistics.Telemetry.System.Core.ViewModels
+@using EasyLogistics.Telemetry.System.Core.Interfaces
+@using EasyLogistics.Telemetry.System.Web.Services
+@inject SignalRClientService SignalR
+@inject IFleetStateService StateService
+@implements IDisposable
+@rendermode InteractiveServer
+
+<PageTitle>Dashboard</PageTitle>
+
+<div class="container-fluid">
+    <h1 class="mt-4">Live Fleet Monitor</h1>
+    <table class="table table-dark table-striped mt-4">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Status</th>
+                <th>Position</th>
+                <th>Speed</th>
+                <th>Last Seen</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var truck in _fleet)
+            {
+                <tr>
+                    <td>@truck.Id</td>
+                    <td><span class="badge @(truck.Status == "Speeding" ? "bg-danger" : "bg-success")">@truck.Status</span></td>
+                    <td>@truck.Position</td>
+                    <td>@truck.SpeedDisplay</td>
+                    <td>@truck.LastSeen</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+@code {
+    private List<TruckDisplayVm> _fleet = new();
+
+    protected override async Task OnInitializedAsync() // Change to Async
+    {
+        // 1. Get the current "frozen" frame so the user sees data immediately
+        _fleet = StateService.GetFormattedFleet();
+
+        // 2. IMPORTANT: This kicks the Singleton pipe into gear if it's not running
+        await SignalR.StartAsync();
+
+        // 3. Subscribe to the live stream
+        SignalR.OnFleetReceived += HandleUpdate;
+    }
+
+    private void HandleUpdate(List<TruckDisplayVm> updatedFleet)
+    {
+        _fleet = updatedFleet;
+        InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose() => SignalR.OnFleetReceived -= HandleUpdate;
+}

@@ -1,0 +1,41 @@
+﻿@page "/fleet-map"
+@using EasyLogistics.Telemetry.System.Core.ViewModels
+@using EasyLogistics.Telemetry.System.Web.Services
+@inject SignalRClientService SignalR
+@inject IJSRuntime JS
+@implements IDisposable
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+
+<div id="map-container" style="height: 92vh; width: 100%; background: #1a1a1a;"></div>
+
+@code {
+    private bool _jsReady = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await SignalR.StartAsync();
+        SignalR.OnFleetReceived += HandleFleetUpdate;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            // Initial center on the Ivano-Frankivsk herd
+            await JS.InvokeVoidAsync("initFleetMap", 44.8125, 20.4612);
+            _jsReady = true;
+        }
+    }
+
+    private async void HandleFleetUpdate(List<TruckDisplayVm> fleet)
+    {
+        if (_jsReady)
+        {
+            try {
+                await JS.InvokeVoidAsync("updateMarkers", fleet);
+            } catch { /* Cleanly catch navigation race conditions */ }
+        }
+    }
+
+    public void Dispose() => SignalR.OnFleetReceived -= HandleFleetUpdate;
+}
