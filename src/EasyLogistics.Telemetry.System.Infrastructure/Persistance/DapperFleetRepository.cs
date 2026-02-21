@@ -32,20 +32,23 @@ public class DapperFleetRepository : IFleetRepository
         if (dataToSave == null || !dataToSave.Any()) return;
 
         using var conn = new SqliteConnection(_connectionString);
+        await conn.OpenAsync();
+
+        // Manual mapping into Dapper's optimized parameter collection
+        var parameters = dataToSave.Select(t => {
+            var p = new DynamicParameters();
+            p.Add("@Id", t.Id);
+            p.Add("@Lat", t.Lat);
+            p.Add("@Lng", t.Lng);
+            p.Add("@Speed", t.Speed);
+            p.Add("@Timestamp", t.Timestamp);
+            return p;
+        });
 
         const string sql = @"INSERT INTO TruckHistory (TruckId, Latitude, Longitude, Speed, Timestamp) 
                          VALUES (@Id, @Lat, @Lng, @Speed, @Timestamp)";
 
-        // We manually map the fields to an anonymous object that Dapper loves
-        var mappedData = dataToSave.Select(t => new {
-            t.Id,
-            t.Lat,
-            t.Lng,
-            t.Speed,
-            t.Timestamp
-        });
-
-        await conn.ExecuteAsync(sql, mappedData);
+        await conn.ExecuteAsync(sql, parameters);
     }
 
     public async Task<IEnumerable<TruckTelemetry>> GetHistoryByIdAsync(int truckId)
