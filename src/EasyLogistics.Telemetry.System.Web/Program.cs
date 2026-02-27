@@ -1,70 +1,124 @@
+﻿using System.Runtime.Versioning;
+using EasyLogistics.Telemetry.System.Core.Entities;
 using EasyLogistics.Telemetry.System.Core.Interfaces;
-using EasyLogistics.Telemetry.System.Core.Services;
-using EasyLogistics.Telemetry.System.Infrastructure.Bridge;
-using EasyLogistics.Telemetry.System.Infrastructure.Health;
+using EasyLogistics.Telemetry.System.Core.Models;
+using EasyLogistics.Telemetry.System.Infrastructure;
 using EasyLogistics.Telemetry.System.Infrastructure.Persistence;
 using EasyLogistics.Telemetry.System.Infrastructure.Services;
 using EasyLogistics.Telemetry.System.Web.Components;
 using EasyLogistics.Telemetry.System.Web.Hubs;
 using EasyLogistics.Telemetry.System.Web.Services;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.SignalR.Client;
+using Microsoft.AspNetCore.Components;
 using Serilog;
+
+[assembly: SupportedOSPlatform("windows")]
 
 var builder = WebApplication.CreateBuilder(args);
 
-
-// 1. Core Services (Singletons - The "Source of Truth")
-builder.Services.AddSingleton<IFleetStateService, FleetStateService>();
-builder.Services.AddSingleton<IFleetBridge, MemoryMappedBridge>();
-builder.Services.AddSingleton<FleetAnalytics>();
-
-// 2. Infrastructure (The "Pipes")
-builder.Services.AddSignalR();
-// CHANGE: Make this Singleton so the connection persists during navigation
-builder.Services.AddSingleton<SignalRClientService>();
-
-// 3. Background Workers (The "Engine")
-builder.Services.AddHostedService<FleetWorker>();     // Reads from Python
-builder.Services.AddHostedService<FleetDispatcher>(); // Pushes to SignalR Hub
-
-// 4. Scoped Services (Per-User/Database)
-builder.Services.AddScoped<IFleetRepository, DapperFleetRepository>();
-
-// 5. UI and Logging
-builder.Services.AddRazorComponents()
-    .AddInteractiveServerComponents();
-
+// --- 1. LOGGING ---
 Log.Logger = new LoggerConfiguration()
+    .ReadFrom.Configuration(builder.Configuration)
+    .Enrich.FromLogContext()
     .WriteTo.Console()
-    .WriteTo.File("logs/log-.txt", rollingInterval: RollingInterval.Day)
     .CreateLogger();
 builder.Host.UseSerilog();
 
-builder.Services.AddHealthChecks()
-    .AddCheck<BridgeHealthCheck>("bridge_check");
+// --- 2. CORE SERVICES ---
+builder.Services.AddFleetInfrastructure();
+builder.Services.AddSingleton<ITriageService, AiTriageService>();
+
+// --- 3. IDENTITY CORE ---
+builder.Services.AddIdentityCore<ApplicationUser>()
+    .AddSignInManager()
+    .AddDefaultTokenProviders();
+
+builder.Services.AddScoped<IUserStore<ApplicationUser>, DapperUserStore>();
+builder.Services.AddScoped<IUserPasswordStore<ApplicationUser>, DapperUserStore>();
+builder.Services.AddScoped<IUserEmailStore<ApplicationUser>, DapperUserStore>();
+
+// --- 4. AUTHENTICATION & LOCKDOWN ---
+builder.Services.AddAuthentication(options => {
+    options.DefaultScheme = IdentityConstants.ApplicationScheme;
+    options.DefaultSignInScheme = IdentityConstants.ExternalScheme;
+})
+.AddIdentityCookies();
+
+builder.Services.ConfigureApplicationCookie(options => {
+    options.Cookie.Name = "Fleet.Identity";
+    options.LoginPath = "/login";
+    options.LogoutPath = "/logout";
+    options.Cookie.HttpOnly = true;
+    options.Cookie.SameSite = SameSiteMode.Lax;
+    options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+});
+
+builder.Services.AddAuthorization(options => {
+    options.FallbackPolicy = new AuthorizationPolicyBuilder()
+        .RequireAuthenticatedUser()
+        .Build();
+});
+
+builder.Services.AddCascadingAuthenticationState();
+
+// --- 5. BLAZOR & SIGNALR PLUMBING ---
+builder.Services.AddAntiforgery();
+builder.Services.AddRazorComponents()
+    .AddInteractiveServerComponents();
+
+builder.Services.AddSignalR();
+builder.Services.AddSingleton<IFleetHubNotifier, FleetHubNotifier>();
+builder.Services.AddHostedService<FleetWorker>();
+
+// Fixed: Register the HubConnection factory for DI
+builder.Services.AddScoped<HubConnection>(sp => {
+    var nav = sp.GetRequiredService<NavigationManager>();
+    return new HubConnectionBuilder()
+        .WithUrl(nav.ToAbsoluteUri("/fleethub"))
+        .WithAutomaticReconnect()
+        .Build();
+});
+
+// Fixed: SignalRClientService now gets its HubConnection via DI
+builder.Services.AddScoped<SignalRClientService>();
 
 var app = builder.Build();
 
-app.MapHealthChecks("/health");
-
-// Configure the HTTP request pipeline.
-if (!app.Environment.IsDevelopment())
+// --- 6. DATABASE SEEDING ---
+using (var scope = app.Services.CreateScope())
 {
-    app.UseExceptionHandler("/Error", createScopeForErrors: true);
-    // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
-    app.UseHsts();
+    try
+    {
+        var repo = scope.ServiceProvider.GetRequiredService<IFleetRepository>();
+        if (repo is DapperFleetRepository d) d.InitializeDatabase();
+        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        await IdentitySeeder.SeedAdminUser(userManager);
+    }
+    catch (Exception ex) { Log.Error(ex, "Seeding failed."); }
 }
 
-
+// --- 7. MIDDLEWARE ---
 app.UseHttpsRedirection();
-
-
-app.UseAntiforgery();
-
 app.MapStaticAssets();
+app.UseStaticFiles();
+app.UseRouting();
+app.UseAntiforgery();
+app.UseAuthentication();
+app.UseAuthorization();
+
+// --- 8. ENDPOINTS ---
+app.MapGet("/logout-action", async (SignInManager<ApplicationUser> sm) => {
+    await sm.SignOutAsync();
+    return Results.Redirect("/login");
+}).AllowAnonymous();
 
 app.MapHub<FleetHub>("/fleethub");
 
 app.MapRazorComponents<App>()
-    .AddInteractiveServerRenderMode();
+    .AddInteractiveServerRenderMode()
+    .AllowAnonymous();
 
+Log.Information("🚀 FLEET ENGINE ONLINE: Port 7000");
 app.Run();

@@ -1,87 +1,48 @@
-﻿// js/mapInterop.js
+﻿var map;
+var markers = {};
 
-let map;
-let markers = {};
-
-/**
- * Initializes the Leaflet map.
- * Called from Blazor: OnAfterRenderAsync
- */
-window.initFleetMap = (lat, lng) => {
-    console.log("Initializing Map at:", lat, lng);
-
-    // If map exists, destroy it to allow a clean re-init on navigation
-    if (map !== undefined && map !== null) {
-        map.remove();
-        markers = {};
-    }
-
-    const container = document.getElementById('map-container');
-    if (!container) {
-        console.error("Map container not found!");
-        return;
-    }
-
-    // Initialize Leaflet map
-    map = L.map('map-container').setView([lat, lng], 12);
-
-    // Use OpenStreetMap tiles
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap contributors'
-    }).addTo(map);
-};
-
-/**
- * Updates or creates markers for the fleet.
- * Called from Blazor: HandleFleetUpdate
- */
-window.updateMarkers = (trucks) => {
-    if (!map) return;
-
-    trucks.forEach(truck => {
-        // Safety check for empty positions
-        if (!truck.position || !truck.position.includes(',')) return;
-
-        // Convert "Lat, Lng" string back to numeric array [Lat, Lng]
-        const parts = truck.position.split(',');
-        const lat = parseFloat(parts[0].trim());
-        const lng = parseFloat(parts[1].trim());
-
-        // Skip if coordinates aren't valid numbers
-        if (isNaN(lat) || isNaN(lng)) return;
-
-        const coords = [lat, lng];
-
-        if (!markers[truck.id]) {
-            // Create a new marker if it doesn't exist
-            markers[truck.id] = L.marker(coords).addTo(map)
-                .bindTooltip(`Truck ${truck.id} - ${truck.speedDisplay}`, {
-                    permanent: false,
-                    direction: 'top'
-                });
-        } else {
-            // Move existing marker smoothly
-            markers[truck.id].setLatLng(coords);
-            markers[truck.id].setTooltipContent(`Truck ${truck.id} - ${truck.speedDisplay}`);
+window.mapInterop = {
+    initialize: function (lat, lng) {
+        // CLEANUP: Destroy the old map if it exists to free up the #map div
+        if (map) {
+            map.off();
+            map.remove();
+            map = null;
+            markers = {};
+            this._firstLoadDone = false;
         }
 
-        // Visual speeding indicator (Red hue shift for speeding trucks)
-        const markerElement = markers[truck.id].getElement();
-        if (markerElement) {
-            if (truck.status === "Speeding") {
-                markerElement.style.filter = "hue-rotate(150deg) brightness(1.2) saturate(2)";
+        const el = document.getElementById('map');
+        if (!el) return;
+
+        map = L.map('map', {
+            zoomControl: true,
+            preferCanvas: true
+        }).setView([lat, lng], 13);
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap'
+        }).addTo(map);
+
+        console.log("🚚 Map Ready.");
+    },
+
+    updateTrucks: function (trucks) {
+        if (!map || !trucks) return;
+
+        trucks.forEach(t => {
+            const content = `<div style='padding:10px'><b>Truck #${t.truckId}</b><br/>Speed: ${t.speed} km/h</div>`;
+            if (markers[t.truckId]) {
+                markers[t.truckId].setLatLng([t.latitude, t.longitude]).setPopupContent(content);
             } else {
-                markerElement.style.filter = "none";
+                markers[t.truckId] = L.marker([t.latitude, t.longitude]).addTo(map).bindPopup(content);
             }
-        }
-    });
+        });
 
-    // Cleanup: If a truck is no longer in the list, remove its marker
-    const currentIds = trucks.map(t => t.id.toString());
-    Object.keys(markers).forEach(id => {
-        if (!currentIds.includes(id)) {
-            map.removeLayer(markers[id]);
-            delete markers[id];
+        if (Object.keys(markers).length > 0 && !this._firstLoadDone) {
+            const group = new L.featureGroup(Object.values(markers));
+            map.fitBounds(group.getBounds().pad(0.1));
+            this._firstLoadDone = true;
         }
-    });
+    }
 };

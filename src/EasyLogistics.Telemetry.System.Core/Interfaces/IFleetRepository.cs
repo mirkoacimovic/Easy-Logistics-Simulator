@@ -6,4 +6,5 @@ public interface IFleetRepository
 {
     Task SaveSnapshotAsync(IEnumerable<TruckTelemetry> fleet);
     Task<IEnumerable<TruckTelemetry>> GetHistoryByIdAsync(int truckId);
+    Task<IEnumerable<TruckTelemetry>> GetLatestPositionsAsync();
 }

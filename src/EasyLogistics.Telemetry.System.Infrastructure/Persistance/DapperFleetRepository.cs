@@ -3,59 +3,134 @@ using Microsoft.Data.Sqlite;
 using EasyLogistics.Telemetry.System.Core.Interfaces;
 using EasyLogistics.Telemetry.System.Core.Models;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
+using System.Linq;
 
 namespace EasyLogistics.Telemetry.System.Infrastructure.Persistence;
 
-public class DapperFleetRepository : IFleetRepository
+/// <summary>
+/// High-performance SQLite persistence layer using Dapper.
+/// Aligned with IFleetRepository. Handles binary struct-to-DB mapping.
+/// </summary>
+public sealed class DapperFleetRepository : IFleetRepository
 {
     private readonly string _connectionString;
+    private readonly ILogger<DapperFleetRepository> _logger;
+    private readonly string _absoluteDbPath;
 
-    public DapperFleetRepository(IConfiguration config)
+    public DapperFleetRepository(IConfiguration config, ILogger<DapperFleetRepository> logger)
     {
-        // Points to "EasyLogistics.db" file in your project root
-        _connectionString = config.GetConnectionString("Default") ?? "Data Source=EasyLogistics.db";
-        using var conn = new SqliteConnection(_connectionString);
-        conn.Execute(@"
-        CREATE TABLE IF NOT EXISTS TruckHistory (
-            Id INTEGER PRIMARY KEY AUTOINCREMENT,
-            TruckId INTEGER NOT NULL,
-            Latitude REAL NOT NULL,
-            Longitude REAL NOT NULL,
-            Speed REAL NOT NULL,
-            Timestamp INTEGER NOT NULL
-        )");
+        _logger = logger;
+
+        // Verify the Anchor Path - Hardcoded as requested for local stability
+        _absoluteDbPath = @"C:\Users\macim\FinalProject\EasyLogistics\src\EasyLogistics.Telemetry.System.Web\EasyLogistics.db";
+        _connectionString = $"Data Source={_absoluteDbPath};Cache=Shared";
+
+        InitializeDatabase();
     }
 
+    public void InitializeDatabase()
+    {
+        using var conn = new SqliteConnection(_connectionString);
+        conn.Open();
+
+        // Noah Gift Principle: Optimize for Write Performance (WAL Mode)
+        conn.Execute("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;");
+
+        // Telemetry History Table
+        conn.Execute(@"
+            CREATE TABLE IF NOT EXISTS TruckHistory (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                TruckId INTEGER NOT NULL,
+                Latitude REAL NOT NULL,
+                Longitude REAL NOT NULL,
+                Speed REAL NOT NULL,
+                FuelConsumed REAL NOT NULL,
+                DistanceTraveled REAL NOT NULL,
+                TotalCost REAL NOT NULL,
+                Timestamp INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS IX_TruckHistory_TruckId_Timestamp ON TruckHistory(TruckId, Timestamp DESC);");
+
+        // Identity Table (Dapper User Store)
+        conn.Execute(@"
+            CREATE TABLE IF NOT EXISTS AspNetUsers (
+                Id TEXT PRIMARY KEY,
+                UserName TEXT,
+                NormalizedUserName TEXT,
+                Email TEXT,
+                NormalizedEmail TEXT,
+                PasswordHash TEXT,
+                SecurityStamp TEXT,
+                ConcurrencyStamp TEXT,
+                FirstName TEXT,
+                LastName TEXT,
+                JoinedDate TEXT,
+                IsActive INTEGER
+            );");
+    }
+
+    /// <summary>
+    /// FIXED: Explicitly maps Struct Fields to Dapper Parameters to prevent the 404/Crash.
+    /// </summary>
     public async Task SaveSnapshotAsync(IEnumerable<TruckTelemetry> fleet)
     {
-        var dataToSave = fleet?.Where(t => t.Id > 0).ToList();
-        if (dataToSave == null || !dataToSave.Any()) return;
+        if (fleet == null || !fleet.Any()) return;
 
+        const string sql = @"
+            INSERT INTO TruckHistory (TruckId, Latitude, Longitude, Speed, FuelConsumed, DistanceTraveled, TotalCost, Timestamp)
+            VALUES (@TruckId, @Latitude, @Longitude, @Speed, @FuelConsumed, @DistanceTraveled, @TotalCost, @Timestamp)";
+
+        try
+        {
+            using var conn = new SqliteConnection(_connectionString);
+
+            // Dapper cannot "see" fields in a struct. We must project to an anonymous type.
+            var projectedParams = fleet.Select(f => new {
+                f.TruckId,
+                f.Latitude,
+                f.Longitude,
+                f.Speed,
+                f.FuelConsumed,
+                f.DistanceTraveled,
+                f.TotalCost,
+                f.Timestamp
+            });
+
+            await conn.ExecuteAsync(sql, projectedParams);
+        }
+        catch (Exception ex)
+        {
+            // Logging prevents the BackgroundService from dying (and the 404/SignalR drop)
+            _logger.LogError(ex, "[DB] Write transaction failed for fleet snapshot mapping.");
+        }
+    }
+
+    public async Task<IEnumerable<TruckTelemetry>> GetLatestPositionsAsync()
+    {
         using var conn = new SqliteConnection(_connectionString);
-        await conn.OpenAsync();
+        const string sql = @"
+            SELECT TruckId, Latitude, Longitude, Speed, FuelConsumed, DistanceTraveled, TotalCost, Timestamp
+            FROM (
+                SELECT *, ROW_NUMBER() OVER (PARTITION BY TruckId ORDER BY Timestamp DESC) as rn
+                FROM TruckHistory
+            ) WHERE rn = 1";
 
-        // Manual mapping into Dapper's optimized parameter collection
-        var parameters = dataToSave.Select(t => {
-            var p = new DynamicParameters();
-            p.Add("@Id", t.Id);
-            p.Add("@Lat", t.Lat);
-            p.Add("@Lng", t.Lng);
-            p.Add("@Speed", t.Speed);
-            p.Add("@Timestamp", t.Timestamp);
-            return p;
-        });
-
-        const string sql = @"INSERT INTO TruckHistory (TruckId, Latitude, Longitude, Speed, Timestamp) 
-                         VALUES (@Id, @Lat, @Lng, @Speed, @Timestamp)";
-
-        await conn.ExecuteAsync(sql, parameters);
+        try
+        {
+            return await conn.QueryAsync<TruckTelemetry>(sql);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[DB] Failed to fetch latest fleet positions");
+            return Enumerable.Empty<TruckTelemetry>();
+        }
     }
 
     public async Task<IEnumerable<TruckTelemetry>> GetHistoryByIdAsync(int truckId)
     {
         using var conn = new SqliteConnection(_connectionString);
-        return await conn.QueryAsync<TruckTelemetry>(
-            "SELECT * FROM TruckHistory WHERE TruckId = @truckId ORDER BY Timestamp DESC LIMIT 100",
-            new { truckId });
+        const string sql = "SELECT * FROM TruckHistory WHERE TruckId = @truckId ORDER BY Timestamp DESC LIMIT 100";
+        return await conn.QueryAsync<TruckTelemetry>(sql, new { truckId });
     }
 }

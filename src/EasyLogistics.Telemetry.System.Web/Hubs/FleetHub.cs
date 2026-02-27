@@ -1,22 +1,37 @@
 ﻿using Microsoft.AspNetCore.SignalR;
-using EasyLogistics.Telemetry.System.Core.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 
 namespace EasyLogistics.Telemetry.System.Web.Hubs;
 
-public class FleetHub : Hub
+/// <summary>
+/// High-frequency SignalR hub for telemetry broadcasting.
+/// Only authorized users can subscribe to the stream.
+/// </summary>
+[Authorize]
+public sealed class FleetHub : Hub
 {
-    private readonly IFleetStateService _stateService;
+    private readonly ILogger<FleetHub> _logger;
 
-    // Fixed: Injecting IFleetStateService (Interface) instead of the concrete class
-    public FleetHub(IFleetStateService stateService)
+    public FleetHub(ILogger<FleetHub> logger)
     {
-        _stateService = stateService;
+        _logger = logger;
     }
 
     public override async Task OnConnectedAsync()
     {
-        var initialFleet = _stateService.GetFormattedFleet();
-        await Clients.Caller.SendAsync("ReceiveFleetUpdate", _stateService.GetFormattedFleet());
+        _logger.LogInformation("🚚 Client connected to FleetHub: {ConnectionId} (User: {User})",
+            Context.ConnectionId,
+            Context.User?.Identity?.Name ?? "Authenticated User");
+
         await base.OnConnectedAsync();
+    }
+
+    public override async Task OnDisconnectedAsync(Exception? exception)
+    {
+        if (exception != null)
+        {
+            _logger.LogError(exception, "Client disconnected with error: {ConnectionId}", Context.ConnectionId);
+        }
+        await base.OnDisconnectedAsync(exception);
     }
 }

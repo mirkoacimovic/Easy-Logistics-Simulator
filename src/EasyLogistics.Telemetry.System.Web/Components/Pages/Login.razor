@@ -1,0 +1,61 @@
+﻿@page "/login"
+@using global::System.ComponentModel.DataAnnotations
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Identity
+@using EasyLogistics.Telemetry.System.Core.Entities
+@* This is the ONLY page allowed to bypass the lock *@
+@attribute [AllowAnonymous]
+@inject SignInManager<ApplicationUser> SignInManager
+@inject NavigationManager NavigationManager
+
+<PageTitle>Login - Fleet Engine</PageTitle>
+
+<div class="container d-flex justify-content-center align-items-center" style="min-height: 80vh;">
+    <div class="card shadow-lg border-0" style="width: 100%; max-width: 400px;">
+        <div class="card-header bg-dark text-white text-center py-3">
+            <h4 class="mb-0">FLEET COMMAND</h4>
+        </div>
+        <div class="card-body p-4">
+            <EditForm Model="Input" OnValidSubmit="HandleLogin" FormName="FleetLoginForm">
+                <DataAnnotationsValidator />
+
+                <div class="mb-3">
+                    <label class="form-label">Email</label>
+                    <InputText @bind-Value="Input.Email" class="form-control" placeholder="admin@fleet.local" />
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">Password</label>
+                    <InputText @bind-Value="Input.Password" type="password" class="form-control" />
+                </div>
+
+                <button type="submit" class="btn btn-primary w-100 py-2">AUTHENTICATE</button>
+            </EditForm>
+        </div>
+    </div>
+</div>
+
+@code {
+    [SupplyParameterFromForm]
+    public LoginInput Input { get; set; } = new();
+
+    private async Task HandleLogin()
+    {
+        var result = await SignInManager.PasswordSignInAsync(Input.Email, Input.Password, false, false);
+        if (result.Succeeded)
+        {
+            // Refresh the whole browser state to pick up the new Identity cookie
+            NavigationManager.NavigateTo("/", forceLoad: true);
+        }
+        else
+        {
+            // Add error handling here if needed
+        }
+    }
+
+    public class LoginInput
+    {
+        [Required] public string Email { get; set; } = "";
+        [Required] public string Password { get; set; } = "";
+    }
+}

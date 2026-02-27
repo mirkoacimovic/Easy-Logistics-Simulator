@@ -1,24 +1,29 @@
-﻿using EasyLogistics.Telemetry.System.Core.ViewModels;
-using Microsoft.AspNetCore.SignalR.Client;
+﻿using Microsoft.AspNetCore.SignalR.Client;
+using Microsoft.AspNetCore.Components.Authorization;
+using EasyLogistics.Telemetry.System.Core.Models;
 
 namespace EasyLogistics.Telemetry.System.Web.Services;
 
-public class SignalRClientService
+public class SignalRClientService : IAsyncDisposable
 {
-    private readonly HubConnection _hubConnection;
+    private readonly HubConnection _connection;
+    private readonly ILogger<SignalRClientService> _logger;
+    private readonly AuthenticationStateProvider _authStateProvider;
 
-    // Fixed Warning: Declared as nullable event
-    public event Action<List<TruckDisplayVm>>? OnFleetReceived;
+    // Fixed: Now using the display-optimized View Model
+    public event Action<IEnumerable<TruckDisplayVm>>? OnFleetReceived;
 
-    public SignalRClientService()
+    public SignalRClientService(
+        HubConnection connection,
+        ILogger<SignalRClientService> logger,
+        AuthenticationStateProvider authStateProvider)
     {
-        // Matches your 'https' profile in launchSettings.json
-        _hubConnection = new HubConnectionBuilder()
-            .WithUrl("https://localhost:7000/fleethub")
-            .WithAutomaticReconnect()
-            .Build();
+        _connection = connection;
+        _logger = logger;
+        _authStateProvider = authStateProvider;
 
-        _hubConnection.On<List<TruckDisplayVm>>("ReceiveFleetUpdate", (fleet) =>
+        // Listener for the Hub broadcast
+        _connection.On<IEnumerable<TruckDisplayVm>>("ReceiveFleetUpdate", fleet =>
         {
             OnFleetReceived?.Invoke(fleet);
         });
@@ -26,17 +31,28 @@ public class SignalRClientService
 
     public async Task StartAsync()
     {
-        if (_hubConnection.State == HubConnectionState.Disconnected)
+        try
         {
-            try
+            if (_connection.State != HubConnectionState.Disconnected) return;
+
+            var authState = await _authStateProvider.GetAuthenticationStateAsync();
+            if (authState.User.Identity?.IsAuthenticated != true)
             {
-                await _hubConnection.StartAsync();
-                Console.WriteLine("SignalR: Connection Established Successfully.");
+                _logger.LogWarning("SignalR: Connection deferred - User is anonymous.");
+                return;
             }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"SignalR Connection Error: {ex.Message}");
-            }
+
+            await _connection.StartAsync();
+            _logger.LogInformation("🚀 SignalR: FleetHub Connected.");
         }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "SignalR: Failed to connect.");
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await _connection.DisposeAsync();
     }
 }

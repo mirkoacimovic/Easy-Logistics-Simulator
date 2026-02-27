@@ -1,0 +1,11 @@
+﻿@page "/logout"
+@attribute [AllowAnonymous]
+@inject NavigationManager Nav
+
+@code {
+    protected override void OnInitialized()
+    {
+        // This triggers the Minimal API endpoint in Program.cs
+        Nav.NavigateTo("/logout-action", forceLoad: true);
+    }
+}

@@ -1,61 +1,111 @@
 ﻿@page "/"
-@using EasyLogistics.Telemetry.System.Core.ViewModels
+@using EasyLogistics.Telemetry.System.Core.Models
 @using EasyLogistics.Telemetry.System.Core.Interfaces
 @using EasyLogistics.Telemetry.System.Web.Services
+@using Microsoft.AspNetCore.Components.Authorization
 @inject SignalRClientService SignalR
 @inject IFleetStateService StateService
 @implements IDisposable
-@rendermode InteractiveServer
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
 
-<PageTitle>Dashboard</PageTitle>
+<PageTitle>Dashboard | Fleet Engine</PageTitle>
 
-<div class="container-fluid">
-    <h1 class="mt-4">Live Fleet Monitor</h1>
-    <table class="table table-dark table-striped mt-4">
-        <thead>
-            <tr>
-                <th>ID</th>
-                <th>Status</th>
-                <th>Position</th>
-                <th>Speed</th>
-                <th>Last Seen</th>
-            </tr>
-        </thead>
-        <tbody>
-            @foreach (var truck in _fleet)
-            {
+<div class="container-fluid p-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1 class="fw-bold text-dark text-uppercase tracking-tighter">Live Fleet Monitor</h1>
+        <div class="badge bg-primary p-2 shadow-sm">
+            <i class="bi bi-broadcast me-2"></i>1Hz Refresh Active
+        </div>
+    </div>
+
+    <div class="table-responsive shadow-sm rounded border bg-white">
+        <table class="table table-hover align-middle mb-0">
+            <thead class="table-dark">
                 <tr>
-                    <td>@truck.Id</td>
-                    <td><span class="badge @(truck.Status == "Speeding" ? "bg-danger" : "bg-success")">@truck.Status</span></td>
-                    <td>@truck.Position</td>
-                    <td>@truck.SpeedDisplay</td>
-                    <td>@truck.LastSeen</td>
+                    <th class="ps-4">Truck ID</th>
+                    <th>Status</th>
+                    <th>Position (Lat, Lng)</th>
+                    <th>Speed</th>
+                    <th>Fuel</th>
+                    <th class="pe-4 text-end">Last Update</th>
                 </tr>
-            }
-        </tbody>
-    </table>
+            </thead>
+            <tbody>
+                @if (_fleet == null || !_fleet.Any())
+                {
+                    <tr>
+                        <td colspan="6" class="text-center py-5 text-muted">
+                            <div class="spinner-border spinner-border-sm me-2 text-primary"></div>
+                            Waiting for Telemetry Bridge...
+                        </td>
+                    </tr>
+                }
+                else
+                {
+                    @foreach (var truck in _fleet)
+                    {
+                        <tr>
+                            <td class="ps-4 fw-bold text-primary">#@truck.TruckId</td>
+                            <td>
+                                <span class="badge @(truck.Status == "Moving" ? "bg-success" : "bg-secondary")">
+                                    @truck.Status
+                                </span>
+                            </td>
+                            <td class="font-monospace small">
+                                @truck.Latitude.ToString("F4"), @truck.Longitude.ToString("F4")
+                            </td>
+                            <td><span class="fw-bold">@truck.Speed.ToString("F1")</span> <small class="text-muted">km/h</small></td>
+                            <td><span class="text-danger fw-bold">@truck.FuelConsumed.ToString("F2")</span> <small class="text-muted">L</small></td>
+                            <td class="pe-4 text-end text-muted small">@truck.LastUpdated.ToString("HH:mm:ss")</td>
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+    </div>
 </div>
 
 @code {
-    private List<TruckDisplayVm> _fleet = new();
+    private IEnumerable<TruckDisplayVm> _fleet = new List<TruckDisplayVm>();
 
-    protected override async Task OnInitializedAsync() // Change to Async
+    [CascadingParameter]
+    private Task<AuthenticationState>? AuthStateTask { get; set; }
+
+    protected override void OnInitialized()
     {
-        // 1. Get the current "frozen" frame so the user sees data immediately
         _fleet = StateService.GetFormattedFleet();
-
-        // 2. IMPORTANT: This kicks the Singleton pipe into gear if it's not running
-        await SignalR.StartAsync();
-
-        // 3. Subscribe to the live stream
-        SignalR.OnFleetReceived += HandleUpdate;
     }
 
-    private void HandleUpdate(List<TruckDisplayVm> updatedFleet)
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && AuthStateTask != null)
+        {
+            var authState = await AuthStateTask;
+            if (authState.User.Identity?.IsAuthenticated == true)
+            {
+                try
+                {
+                    await SignalR.StartAsync();
+                    SignalR.OnFleetReceived += HandleUpdate;
+                }
+                catch (Exception ex)
+                {
+                    // Catch 401 or connection errors to prevent UI crash
+                    Console.WriteLine($"SignalR Startup Deferred: {ex.Message}");
+                }
+            }
+        }
+    }
+
+    private void HandleUpdate(IEnumerable<TruckDisplayVm> updatedFleet)
     {
         _fleet = updatedFleet;
         InvokeAsync(StateHasChanged);
     }
 
-    public void Dispose() => SignalR.OnFleetReceived -= HandleUpdate;
+    public void Dispose()
+    {
+        SignalR.OnFleetReceived -= HandleUpdate;
+    }
 }

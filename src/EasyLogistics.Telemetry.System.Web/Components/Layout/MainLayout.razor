@@ -1,23 +1,37 @@
 ﻿@inherits LayoutComponentBase
+@using Microsoft.AspNetCore.Components.Authorization
 
 <div class="page">
-    <div class="sidebar">
-        <NavMenu />
-    </div>
+    <AuthorizeView>
+        <Authorized>
+            @* The outer 'context' belongs to this AuthorizeView *@
+            <div class="sidebar">
+                <NavMenu />
+            </div>
 
-    <main>
-        <div class="top-row px-4">
-            <a href="https://learn.microsoft.com/aspnet/core/" target="_blank">About</a>
-        </div>
+            <main>
+                <div class="top-row px-4 border-bottom bg-white d-flex align-items-center justify-content-between">
+                    <span class="fw-bold text-uppercase">Fleet Engine v1.0</span>
 
-        <article class="content px-4">
-            @Body
-        </article>
-    </main>
-</div>
+                    @* Rename the inner context to 'userContext' to avoid the conflict *@
+                    <AuthorizeView Context="userContext">
+                        <span class="text-muted small">
+                            <i class="bi bi-person-circle me-1"></i>
+                            User: @userContext.User.Identity?.Name
+                        </span>
+                    </AuthorizeView>
+                </div>
 
-<div id="blazor-error-ui" data-nosnippet>
-    An unhandled error has occurred.
-    <a href="." class="reload">Reload</a>
-    <span class="dismiss">🗙</span>
+                <article class="content px-4">
+                    @Body
+                </article>
+            </main>
+        </Authorized>
+        <NotAuthorized>
+            @* Use the full body for the Login page so it remains centered/black *@
+            <main>
+                @Body
+            </main>
+        </NotAuthorized>
+    </AuthorizeView>
 </div>

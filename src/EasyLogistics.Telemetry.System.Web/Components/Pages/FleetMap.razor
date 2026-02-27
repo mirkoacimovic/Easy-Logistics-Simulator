@@ -1,41 +1,79 @@
 ﻿@page "/fleet-map"
-@using EasyLogistics.Telemetry.System.Core.ViewModels
-@using EasyLogistics.Telemetry.System.Web.Services
-@inject SignalRClientService SignalR
+@using EasyLogistics.Telemetry.System.Core.Interfaces
+@using EasyLogistics.Telemetry.System.Core.Models
+@using Microsoft.AspNetCore.Authorization
+@attribute [Authorize]
+@inject IFleetStateService FleetService
 @inject IJSRuntime JS
 @implements IDisposable
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 
-<div id="map-container" style="height: 92vh; width: 100%; background: #1a1a1a;"></div>
+<PageTitle>Live Map | Europe</PageTitle>
+
+<div class="vh-100 d-flex flex-column bg-dark">
+    @* Dashboard Mini-Header *@
+    <div class="px-4 py-2 bg-black border-bottom border-secondary d-flex justify-content-between align-items-center">
+        <h5 class="text-white mb-0 text-uppercase tracking-tighter fw-bold">
+            <span class="text-primary">●</span> Live Fleet Tracking: Europe
+        </h5>
+        <div class="small text-muted">
+            Last Heartbeat: @(_fleet.FirstOrDefault()?.LastUpdated.ToString("HH:mm:ss") ?? "Connecting...")
+        </div>
+    </div>
+
+    @* Full Screen Map Container - Fixed Height is crucial for Leaflet *@
+    <div id="map" class="flex-grow-1" style="background: #242424; min-height: 500px;"></div>
+</div>
 
 @code {
-    private bool _jsReady = false;
+    private IEnumerable<TruckDisplayVm> _fleet = new List<TruckDisplayVm>();
 
-    protected override async Task OnInitializedAsync()
+    protected override void OnInitialized()
     {
-        await SignalR.StartAsync();
-        SignalR.OnFleetReceived += HandleFleetUpdate;
+        _fleet = FleetService.GetFormattedFleet();
+        // Subscribe to the Infrastructure event loop
+        FleetService.OnFleetUpdated += HandleFleetUpdate;
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
         {
-            // Initial center on the Ivano-Frankivsk herd
-            await JS.InvokeVoidAsync("initFleetMap", 44.8125, 20.4612);
-            _jsReady = true;
+            // Initialize Leaflet Map via JS Interop
+            // Belgrade center: 44.8186, 20.4689
+            await JS.InvokeVoidAsync("mapInterop.initialize", 44.8186, 20.4689);
+
+            if (_fleet.Any())
+            {
+                await JS.InvokeVoidAsync("mapInterop.updateTrucks", _fleet);
+            }
         }
     }
 
-    private async void HandleFleetUpdate(List<TruckDisplayVm> fleet)
+    private async void HandleFleetUpdate(List<TruckDisplayVm> newData)
     {
-        if (_jsReady)
+        // Must use InvokeAsync because this event comes from a background thread (FleetWorker)
+        await InvokeAsync(async () =>
         {
-            try {
-                await JS.InvokeVoidAsync("updateMarkers", fleet);
-            } catch { /* Cleanly catch navigation race conditions */ }
-        }
+            _fleet = newData;
+
+            try
+            {
+                // Push new coordinates to the Leaflet markers
+                await JS.InvokeVoidAsync("mapInterop.updateTrucks", _fleet);
+            }
+            catch (Exception)
+            {
+                // Silently handle if JS is not ready yet during navigation
+            }
+
+            StateHasChanged();
+        });
     }
 
-    public void Dispose() => SignalR.OnFleetReceived -= HandleFleetUpdate;
+    public void Dispose()
+    {
+        // Unsubscribe to prevent memory leaks in the Singleton service
+        FleetService.OnFleetUpdated -= HandleFleetUpdate;
+    }
 }

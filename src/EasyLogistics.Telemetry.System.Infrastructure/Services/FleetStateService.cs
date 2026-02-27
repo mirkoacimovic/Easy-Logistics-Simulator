@@ -1,37 +1,69 @@
-﻿using EasyLogistics.Telemetry.System.Core.Models;
-using EasyLogistics.Telemetry.System.Core.ViewModels;
-using EasyLogistics.Telemetry.System.Core.Services;
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using EasyLogistics.Telemetry.System.Core.Interfaces;
+using EasyLogistics.Telemetry.System.Core.Models;
+using EasyLogistics.Telemetry.System.Core.Entities;
 
 namespace EasyLogistics.Telemetry.System.Infrastructure.Services;
 
+/// <summary>
+/// Manages the high-speed, in-memory state of the entire truck fleet.
+/// Acts as the primary data source for real-time UI components.
+/// </summary>
 public class FleetStateService : IFleetStateService
 {
-    private readonly ConcurrentDictionary<int, TruckTelemetry> _latestFleet = new();
-    private readonly FleetAnalytics _analytics = new(); // Domain Logic
+    // ConcurrentDictionary ensures thread-safety during the BackgroundWorker's 1Hz write loop
+    private readonly ConcurrentDictionary<int, TruckDisplayVm> _currentFleet = new();
 
-    public void UpdateFleet(IEnumerable<TruckTelemetry> trucks)
+    // Event invoked whenever the fleet state changes, allowing UI components to react
+    public event Action<List<TruckDisplayVm>>? OnFleetUpdated;
+
+    /// <summary>
+    /// Processes fresh snapshots from the Python Engine and updates the memory store.
+    /// Maps the raw binary struct (TruckTelemetry) to the UI-friendly ViewModel (TruckDisplayVm).
+    /// </summary>
+    public Task UpdateFleet(IEnumerable<TruckTelemetry> snapshots)
     {
-        foreach (var truck in trucks.Where(t => t.Id > 0))
+        if (snapshots == null) return Task.CompletedTask;
+
+        foreach (var s in snapshots)
         {
-            _latestFleet[truck.Id] = truck;
+            if (s.TruckId <= 0) continue;
+
+            var vm = new TruckDisplayVm
+            {
+                TruckId = s.TruckId,
+                Latitude = s.Latitude,
+                Longitude = s.Longitude,
+                Speed = Math.Round(s.Speed, 1),
+                FuelConsumed = Math.Round(s.FuelConsumed, 2),
+                DistanceTraveled = Math.Round(s.DistanceTraveled, 1),
+                TotalCost = s.TotalCost,
+
+                // Real-time status logic derived from the simulation speed
+                Status = s.Speed > 90.0 ? "Speeding" : (s.Speed > 5.0 ? "Moving" : "Idle"),
+
+                // Fallback to local time if timestamp is corrupted
+                LastUpdated = s.Timestamp > 0 ? DateTime.FromFileTime(s.Timestamp) : DateTime.Now
+            };
+
+            // Atomic update: ensures the UI never sees a partial truck object
+            _currentFleet.AddOrUpdate(s.TruckId, vm, (id, oldVm) => vm);
         }
+
+        // Snapshot the current values and broadcast to all subscribers (UI/Maps)
+        var latestList = GetFormattedFleet();
+        OnFleetUpdated?.Invoke(latestList);
+
+        return Task.CompletedTask;
     }
 
-    // This is what the UI (SignalR/Blazor) will actually consume
+    /// <summary>
+    /// Returns the entire fleet ordered by ID for consistent UI display.
+    /// </summary>
     public List<TruckDisplayVm> GetFormattedFleet()
     {
-        return _latestFleet.Values.Select(t => new TruckDisplayVm
-        {
-            Id = t.Id,
-            Status = t.Speed > 80 ? "Speeding" : "Moving",
-            // Use the fixed names 'Lat' and 'Lng'
-            Position = $"{t.Lat:F4}, {t.Lng:F4}",
-            SpeedDisplay = $"{t.Speed:F1} km/h",
-            LastSeen = DateTimeOffset.FromUnixTimeSeconds(t.Timestamp).DateTime.ToLocalTime().ToString("HH:mm:ss")
-        }).ToList();
+        return _currentFleet.Values
+            .OrderBy(t => t.TruckId)
+            .ToList();
     }
-
-    public List<TruckTelemetry> GetCurrentFleet() => _latestFleet.Values.ToList();
 }

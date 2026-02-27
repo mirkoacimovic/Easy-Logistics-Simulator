@@ -6,6 +6,10 @@
 @using static Microsoft.AspNetCore.Components.Web.RenderMode
 @using Microsoft.AspNetCore.Components.Web.Virtualization
 @using Microsoft.JSInterop
-@using EasyLogistics.Telemetry.System
 @using EasyLogistics.Telemetry.System.Web
 @using EasyLogistics.Telemetry.System.Web.Components
+@using EasyLogistics.Telemetry.System.Web.Services
+@using Microsoft.AspNetCore.Authorization
+
+@* LOCKS EVERY PAGE IN THE PROJECT BY DEFAULT *@
+@attribute [Authorize]

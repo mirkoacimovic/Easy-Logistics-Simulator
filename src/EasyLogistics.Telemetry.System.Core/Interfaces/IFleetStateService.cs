@@ -1,9 +1,12 @@
-﻿using EasyLogistics.Telemetry.System.Core.ViewModels;
+﻿using EasyLogistics.Telemetry.System.Core.Models;
 
 namespace EasyLogistics.Telemetry.System.Core.Interfaces;
 
 public interface IFleetStateService
 {
-    void UpdateFleet(IEnumerable<EasyLogistics.Telemetry.System.Core.Models.TruckTelemetry> data);
+    // The "Megaphone" that tells the UI to refresh
+    event Action<List<TruckDisplayVm>>? OnFleetUpdated;
+
+    Task UpdateFleet(IEnumerable<TruckTelemetry> snapshots);
     List<TruckDisplayVm> GetFormattedFleet();
 }

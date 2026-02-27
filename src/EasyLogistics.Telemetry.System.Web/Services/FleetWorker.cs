@@ -1,42 +1,48 @@
-﻿using EasyLogistics.Telemetry.System.Core.Interfaces;
+﻿using System.Runtime.Versioning;
+using EasyLogistics.Telemetry.System.Core.Interfaces;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
-public class FleetWorker : BackgroundService
+namespace EasyLogistics.Telemetry.System.Infrastructure.Services;
+
+[SupportedOSPlatform("windows")]
+public sealed class FleetWorker : BackgroundService
 {
-    private readonly IServiceProvider _serviceProvider;
+    private readonly ILogger<FleetWorker> _logger;
     private readonly IFleetBridge _bridge;
     private readonly IFleetStateService _stateService;
-    private DateTime _lastSaveTime = DateTime.MinValue;
 
-    public FleetWorker(IFleetBridge bridge, IFleetStateService stateService, IServiceProvider serviceProvider)
+    public FleetWorker(
+        ILogger<FleetWorker> logger,
+        IFleetBridge bridge,
+        IFleetStateService stateService)
     {
+        _logger = logger;
         _bridge = bridge;
         _stateService = stateService;
-        _serviceProvider = serviceProvider;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        _logger.LogInformation("===> [PHASE 4] TELEMETRY LOOP ACTIVE");
+
         while (!stoppingToken.IsCancellationRequested)
         {
-            var fleetData = _bridge.ReadFleet();
-
-            if (fleetData != null && fleetData.Any())
+            try
             {
-                _stateService.UpdateFleet(fleetData);
+                var snapshots = _bridge.ReadFleet();
 
-                // Throttled Save
-                if (DateTime.UtcNow - _lastSaveTime > TimeSpan.FromSeconds(5))
+                if (snapshots != null && snapshots.Any())
                 {
-                    // This is how you use a Scoped Repository in a Singleton Worker:
-                    using (var scope = _serviceProvider.CreateScope())
-                    {
-                        var repo = scope.ServiceProvider.GetRequiredService<IFleetRepository>();
-                        await repo.SaveSnapshotAsync(fleetData);
-                    }
-                    _lastSaveTime = DateTime.UtcNow;
+                    await _stateService.UpdateFleet(snapshots);
                 }
             }
-            await Task.Delay(100, stoppingToken);
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Telemetry Loop pulse failure.");
+            }
+
+            await Task.Delay(1000, stoppingToken);
         }
     }
 }
