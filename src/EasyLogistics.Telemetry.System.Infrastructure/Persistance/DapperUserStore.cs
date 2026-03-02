@@ -9,13 +9,13 @@ namespace EasyLogistics.Telemetry.System.Infrastructure.Persistence;
 public class DapperUserStore : IUserStore<ApplicationUser>, IUserPasswordStore<ApplicationUser>, IUserEmailStore<ApplicationUser>
 {
     private readonly string _connectionString;
-    private readonly string _absoluteDbPath;
 
     public DapperUserStore(IConfiguration config)
     {
-        // Aligning with the anchor path defined in DapperFleetRepository
-        _absoluteDbPath = @"C:\Users\macim\FinalProject\EasyLogistics\src\EasyLogistics.Telemetry.System.Web\EasyLogistics.db";
-        _connectionString = $"Data Source={_absoluteDbPath}";
+        // PRO: Pull from config or fallback to a relative path. 
+        // Never hardcode C:\Users paths in Infrastructure.
+        _connectionString = config.GetConnectionString("DefaultConnection")
+            ?? "Data Source=EasyLogistics.db";
     }
 
     public async Task<IdentityResult> CreateAsync(ApplicationUser user, CancellationToken ct)
@@ -46,9 +46,27 @@ public class DapperUserStore : IUserStore<ApplicationUser>, IUserPasswordStore<A
     public async Task<ApplicationUser?> FindByEmailAsync(string normalizedEmail, CancellationToken ct)
     {
         using var conn = new SqliteConnection(_connectionString);
-        // NormalizedEmail is what UserManager uses for lookups
         return await conn.QueryFirstOrDefaultAsync<ApplicationUser>(
             "SELECT * FROM AspNetUsers WHERE NormalizedEmail = @email", new { email = normalizedEmail });
+    }
+
+    public async Task<IdentityResult> UpdateAsync(ApplicationUser user, CancellationToken ct)
+    {
+        using var conn = new SqliteConnection(_connectionString);
+        const string sql = @"
+            UPDATE AspNetUsers 
+            SET UserName = @UserName, 
+                PasswordHash = @PasswordHash, 
+                NormalizedUserName = @NormalizedUserName, 
+                Email = @Email, 
+                NormalizedEmail = @NormalizedEmail,
+                FirstName = @FirstName,
+                LastName = @LastName,
+                IsActive = @IsActive
+            WHERE Id = @Id";
+
+        await conn.ExecuteAsync(sql, user);
+        return IdentityResult.Success;
     }
 
     // --- Required Interface Implementations ---
@@ -66,17 +84,11 @@ public class DapperUserStore : IUserStore<ApplicationUser>, IUserPasswordStore<A
     public Task SetEmailAsync(ApplicationUser user, string? email, CancellationToken ct) { user.Email = email; return Task.CompletedTask; }
     public Task<string?> GetNormalizedEmailAsync(ApplicationUser user, CancellationToken ct) => Task.FromResult(user.NormalizedEmail);
     public Task SetNormalizedEmailAsync(ApplicationUser user, string? email, CancellationToken ct) { user.NormalizedEmail = email; return Task.CompletedTask; }
+
+    // Auto-confirm emails for this specific Truck Sim context to keep the flow smooth
     public Task<bool> GetEmailConfirmedAsync(ApplicationUser user, CancellationToken ct) => Task.FromResult(true);
     public Task SetEmailConfirmedAsync(ApplicationUser user, bool confirmed, CancellationToken ct) => Task.CompletedTask;
 
-    public async Task<IdentityResult> UpdateAsync(ApplicationUser user, CancellationToken ct)
-    {
-        using var conn = new SqliteConnection(_connectionString);
-        const string sql = "UPDATE AspNetUsers SET UserName = @UserName, PasswordHash = @PasswordHash, NormalizedUserName = @NormalizedUserName, Email = @Email, NormalizedEmail = @NormalizedEmail WHERE Id = @Id";
-        await conn.ExecuteAsync(sql, user);
-        return IdentityResult.Success;
-    }
-
     public Task<IdentityResult> DeleteAsync(ApplicationUser user, CancellationToken ct) => throw new NotImplementedException();
-    public void Dispose() { }
+    public void Dispose() { /* No unmanaged resources */ }
 }

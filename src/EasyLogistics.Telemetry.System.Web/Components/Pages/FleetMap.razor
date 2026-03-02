@@ -8,21 +8,73 @@
 @implements IDisposable
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 
-<PageTitle>Live Map | Europe</PageTitle>
+<PageTitle>Live Fleet | Phase 4</PageTitle>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+<style>
+    .map-wrapper {
+        position: relative;
+        height: calc(100vh - 50px);
+        width: 100%;
+        background: #111;
+    }
+
+    #map {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        right: 0;
+    }
+
+    /* Optional: Glow effect for the truck icons */
+    .leaflet-marker-icon {
+        filter: drop-shadow(0px 4px 4px rgba(0,0,0,0.8));
+    }
+
+    .tracking-tighter {
+        letter-spacing: -0.05em;
+    }
+
+    /* Professional Dark HUD Tooltip */
+    .truck-tooltip {
+        background-color: rgba(0, 0, 0, 0.85) !important;
+        border: 1px solid #444 !important;
+        color: #fff !important;
+        border-radius: 4px;
+        padding: 8px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+    }
+
+   /* Remove the little white arrow from the tooltip */
+   .truck-tooltip::before {
+       border-top-color: rgba(0, 0, 0, 0.85) !important;
+   }
+
+    .leaflet-tooltip-top:before {
+        border-top-color: transparent !important;
+    }
+</style>
 
 <div class="vh-100 d-flex flex-column bg-dark">
-    @* Dashboard Mini-Header *@
-    <div class="px-4 py-2 bg-black border-bottom border-secondary d-flex justify-content-between align-items-center">
+    <div class="px-4 py-2 bg-black border-bottom border-secondary d-flex justify-content-between align-items-center" style="height: 50px;">
         <h5 class="text-white mb-0 text-uppercase tracking-tighter fw-bold">
-            <span class="text-primary">●</span> Live Fleet Tracking: Europe
+            <span class="text-primary">●</span> Live Telemetry <span class="text-muted fw-light">| Engine Active</span>
         </h5>
-        <div class="small text-muted">
-            Last Heartbeat: @(_fleet.FirstOrDefault()?.LastUpdated.ToString("HH:mm:ss") ?? "Connecting...")
+        <div class="d-flex gap-4">
+            <div class="small text-muted">
+                Fleet Size: <span class="text-success fw-bold">@(_fleet?.Count() ?? 0)</span>
+            </div>
+            <div class="small text-muted">
+                Sync: <span class="text-info">@DateTime.Now.ToString("HH:mm:ss")</span>
+            </div>
         </div>
     </div>
 
-    @* Full Screen Map Container - Fixed Height is crucial for Leaflet *@
-    <div id="map" class="flex-grow-1" style="background: #242424; min-height: 500px;"></div>
+    <div class="map-wrapper">
+        <div id="map"></div>
+    </div>
 </div>
 
 @code {
@@ -31,7 +83,6 @@
     protected override void OnInitialized()
     {
         _fleet = FleetService.GetFormattedFleet();
-        // Subscribe to the Infrastructure event loop
         FleetService.OnFleetUpdated += HandleFleetUpdate;
     }
 
@@ -39,11 +90,9 @@
     {
         if (firstRender)
         {
-            // Initialize Leaflet Map via JS Interop
-            // Belgrade center: 44.8186, 20.4689
             await JS.InvokeVoidAsync("mapInterop.initialize", 44.8186, 20.4689);
 
-            if (_fleet.Any())
+            if (_fleet != null && _fleet.Any())
             {
                 await JS.InvokeVoidAsync("mapInterop.updateTrucks", _fleet);
             }
@@ -52,28 +101,16 @@
 
     private async void HandleFleetUpdate(List<TruckDisplayVm> newData)
     {
-        // Must use InvokeAsync because this event comes from a background thread (FleetWorker)
         await InvokeAsync(async () =>
         {
             _fleet = newData;
-
-            try
-            {
-                // Push new coordinates to the Leaflet markers
-                await JS.InvokeVoidAsync("mapInterop.updateTrucks", _fleet);
-            }
-            catch (Exception)
-            {
-                // Silently handle if JS is not ready yet during navigation
-            }
-
+            try { await JS.InvokeVoidAsync("mapInterop.updateTrucks", _fleet); } catch { }
             StateHasChanged();
         });
     }
 
     public void Dispose()
     {
-        // Unsubscribe to prevent memory leaks in the Singleton service
         FleetService.OnFleetUpdated -= HandleFleetUpdate;
     }
 }

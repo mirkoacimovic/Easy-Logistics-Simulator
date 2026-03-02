@@ -1,36 +1,50 @@
-﻿using System.Runtime.Versioning;
+﻿using System.Data;
+using System.Runtime.Versioning;
+using EasyLogistics.Telemetry.System.Core.Configuration;
 using EasyLogistics.Telemetry.System.Core.Entities;
 using EasyLogistics.Telemetry.System.Core.Interfaces;
-using EasyLogistics.Telemetry.System.Core.Models;
 using EasyLogistics.Telemetry.System.Infrastructure;
 using EasyLogistics.Telemetry.System.Infrastructure.Persistence;
 using EasyLogistics.Telemetry.System.Infrastructure.Services;
+using EasyLogistics.Telemetry.System.Infrastructure.Workers;
 using EasyLogistics.Telemetry.System.Web.Components;
 using EasyLogistics.Telemetry.System.Web.Hubs;
 using EasyLogistics.Telemetry.System.Web.Services;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.SignalR.Client;
-using Microsoft.AspNetCore.Components;
+using Microsoft.Data.Sqlite;
 using Serilog;
 
 [assembly: SupportedOSPlatform("windows")]
 
 var builder = WebApplication.CreateBuilder(args);
 
-// --- 1. LOGGING ---
+// --- 1. PRO LOGGING (Serilog) ---
 Log.Logger = new LoggerConfiguration()
     .ReadFrom.Configuration(builder.Configuration)
     .Enrich.FromLogContext()
-    .WriteTo.Console()
+    .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}")
     .CreateLogger();
+
 builder.Host.UseSerilog();
 
-// --- 2. CORE SERVICES ---
+// --- 2. INFRASTRUCTURE & DATABASE ---
+string dbPath = Path.Combine(builder.Environment.ContentRootPath, "EasyLogistics.db");
+string connectionString = $"Data Source={dbPath};Cache=Shared";
+
+builder.Services.AddTransient<IDbConnection>(_ => new SqliteConnection(connectionString));
+
+// PRO: Bind the JSON "FleetEngine" section to the FleetSettings class
+builder.Services.Configure<FleetSettings>(builder.Configuration.GetSection("FleetEngine"));
+
 builder.Services.AddFleetInfrastructure();
 builder.Services.AddSingleton<ITriageService, AiTriageService>();
 
-// --- 3. IDENTITY CORE ---
+// --- 3. IDENTITY & AUTHENTICATION ---
+builder.Services.AddCascadingAuthenticationState();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddAuthentication(IdentityConstants.ApplicationScheme).AddIdentityCookies();
+
 builder.Services.AddIdentityCore<ApplicationUser>()
     .AddSignInManager()
     .AddDefaultTokenProviders();
@@ -39,17 +53,9 @@ builder.Services.AddScoped<IUserStore<ApplicationUser>, DapperUserStore>();
 builder.Services.AddScoped<IUserPasswordStore<ApplicationUser>, DapperUserStore>();
 builder.Services.AddScoped<IUserEmailStore<ApplicationUser>, DapperUserStore>();
 
-// --- 4. AUTHENTICATION & LOCKDOWN ---
-builder.Services.AddAuthentication(options => {
-    options.DefaultScheme = IdentityConstants.ApplicationScheme;
-    options.DefaultSignInScheme = IdentityConstants.ExternalScheme;
-})
-.AddIdentityCookies();
-
 builder.Services.ConfigureApplicationCookie(options => {
-    options.Cookie.Name = "Fleet.Identity";
+    options.Cookie.Name = "Fleet.Auth";
     options.LoginPath = "/login";
-    options.LogoutPath = "/logout";
     options.Cookie.HttpOnly = true;
     options.Cookie.SameSite = SameSiteMode.Lax;
     options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
@@ -61,64 +67,48 @@ builder.Services.AddAuthorization(options => {
         .Build();
 });
 
-builder.Services.AddCascadingAuthenticationState();
-
-// --- 5. BLAZOR & SIGNALR PLUMBING ---
+// --- 4. SIGNALR & BLAZOR ---
 builder.Services.AddAntiforgery();
-builder.Services.AddRazorComponents()
-    .AddInteractiveServerComponents();
+builder.Services.AddRazorComponents().AddInteractiveServerComponents();
 
-builder.Services.AddSignalR();
-builder.Services.AddSingleton<IFleetHubNotifier, FleetHubNotifier>();
-builder.Services.AddHostedService<FleetWorker>();
-
-// Fixed: Register the HubConnection factory for DI
-builder.Services.AddScoped<HubConnection>(sp => {
-    var nav = sp.GetRequiredService<NavigationManager>();
-    return new HubConnectionBuilder()
-        .WithUrl(nav.ToAbsoluteUri("/fleethub"))
-        .WithAutomaticReconnect()
-        .Build();
+builder.Services.AddSignalR(o => {
+    o.EnableDetailedErrors = builder.Environment.IsDevelopment();
 });
 
-// Fixed: SignalRClientService now gets its HubConnection via DI
+builder.Services.AddSingleton<IFleetHubNotifier, FleetHubNotifier>();
+builder.Services.AddHostedService<FleetWorker>();
 builder.Services.AddScoped<SignalRClientService>();
 
 var app = builder.Build();
 
-// --- 6. DATABASE SEEDING ---
-using (var scope = app.Services.CreateScope())
+// --- 5. INITIALIZATION ---
+await using (var scope = app.Services.CreateAsyncScope())
 {
     try
     {
         var repo = scope.ServiceProvider.GetRequiredService<IFleetRepository>();
-        if (repo is DapperFleetRepository d) d.InitializeDatabase();
+        if (repo is DapperFleetRepository dapperRepo) dapperRepo.InitializeDatabase();
+
         var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
         await IdentitySeeder.SeedAdminUser(userManager);
+        Log.Information("✅ System Ready: Database and Admin verified.");
     }
-    catch (Exception ex) { Log.Error(ex, "Seeding failed."); }
+    catch (Exception ex) { Log.Fatal(ex, "Initialization failed."); }
 }
 
-// --- 7. MIDDLEWARE ---
+// --- 6. MIDDLEWARE ---
+if (!app.Environment.IsDevelopment()) app.UseHsts();
 app.UseHttpsRedirection();
 app.MapStaticAssets();
 app.UseStaticFiles();
 app.UseRouting();
-app.UseAntiforgery();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseAntiforgery();
 
-// --- 8. ENDPOINTS ---
-app.MapGet("/logout-action", async (SignInManager<ApplicationUser> sm) => {
-    await sm.SignOutAsync();
-    return Results.Redirect("/login");
-}).AllowAnonymous();
-
+// --- 7. ENDPOINTS ---
 app.MapHub<FleetHub>("/fleethub");
+app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
 
-app.MapRazorComponents<App>()
-    .AddInteractiveServerRenderMode()
-    .AllowAnonymous();
-
-Log.Information("🚀 FLEET ENGINE ONLINE: Port 7000");
+Log.Information("🚀 FLEET ENGINE ONLINE | Port: 7000");
 app.Run();

@@ -1,11 +1,29 @@
 ﻿@page "/logout"
+@using Microsoft.AspNetCore.Identity
+@using EasyLogistics.Telemetry.System.Core.Entities
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Authentication
 @attribute [AllowAnonymous]
+@inject SignInManager<ApplicationUser> SignInManager
 @inject NavigationManager Nav
 
 @code {
-    protected override void OnInitialized()
+    [CascadingParameter]
+    public HttpContext? HttpContext { get; set; }
+
+    protected override async Task OnInitializedAsync()
     {
-        // This triggers the Minimal API endpoint in Program.cs
-        Nav.NavigateTo("/logout-action", forceLoad: true);
+        if (HttpContext is not null && HttpContext.User.Identity?.IsAuthenticated == true)
+        {
+            // Sign out the user from the current HttpContext
+            await SignInManager.SignOutAsync();
+
+            // In Static SSR, we must use the Response redirect to avoid the NavigationException
+            HttpContext.Response.Redirect("/login");
+        }
+        else
+        {
+            Nav.NavigateTo("/login");
+        }
     }
 }

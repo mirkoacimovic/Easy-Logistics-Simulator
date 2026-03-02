@@ -1,7 +1,6 @@
 ﻿using EasyLogistics.Telemetry.System.Core.Entities;
 using Microsoft.AspNetCore.Identity;
-using System;
-using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
 
 namespace EasyLogistics.Telemetry.System.Infrastructure.Persistence;
 
@@ -14,8 +13,9 @@ public static class IdentitySeeder
     public static async Task SeedAdminUser(UserManager<ApplicationUser> userManager)
     {
         const string adminEmail = "admin@trucksim.com";
+        const string defaultPass = "Trucker123!";
 
-        // Check if the user already exists in AspNetUsers via Dapper
+        // 1. Check if the user already exists
         var existingUser = await userManager.FindByEmailAsync(adminEmail);
 
         if (existingUser == null)
@@ -25,8 +25,8 @@ public static class IdentitySeeder
                 Id = Guid.NewGuid().ToString(),
                 UserName = adminEmail,
                 Email = adminEmail,
-                NormalizedUserName = adminEmail.ToUpper(),
-                NormalizedEmail = adminEmail.ToUpper(),
+                NormalizedUserName = adminEmail.ToUpperInvariant(),
+                NormalizedEmail = adminEmail.ToUpperInvariant(),
                 FirstName = "Fleet",
                 LastName = "Manager",
                 JoinedDate = DateTime.UtcNow,
@@ -34,18 +34,25 @@ public static class IdentitySeeder
                 EmailConfirmed = true
             };
 
-            // UserManager handles the Dapper Insert + Password Hashing via your DapperUserStore
-            var result = await userManager.CreateAsync(admin, "Trucker123!");
+            // 2. Create user with Hashed Password
+            // This triggers your DapperUserStore.CreateAsync internally
+            var result = await userManager.CreateAsync(admin, defaultPass);
 
             if (result.Succeeded)
             {
-                // Using Console here as it's early in the boot process
-                Console.WriteLine("✅ IDENTITY SEED: Created admin@trucksim.com [Pass: Trucker123!]");
+                // Note: We use the static Serilog Log here because this often 
+                // runs during app startup before ILogger is injected via DI scope.
+                Serilog.Log.Information("✅ IDENTITY SEED: Admin user created ({Email})", adminEmail);
             }
             else
             {
-                Console.WriteLine("❌ IDENTITY SEED FAILED: " + string.Join(", ", result.Errors.Select(e => e.Description)));
+                var errors = string.Join(", ", result.Errors.Select(e => e.Description));
+                Serilog.Log.Error("❌ IDENTITY SEED FAILED: {Errors}", errors);
             }
+        }
+        else
+        {
+            Serilog.Log.Debug("ℹ️ IDENTITY SEED: Admin user already exists.");
         }
     }
 }

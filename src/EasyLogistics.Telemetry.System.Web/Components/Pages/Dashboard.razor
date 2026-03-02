@@ -9,57 +9,100 @@
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
 
-<PageTitle>Dashboard | Fleet Engine</PageTitle>
+<PageTitle>Command Center | Fleet Engine</PageTitle>
 
-<div class="container-fluid p-4">
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <h1 class="fw-bold text-dark text-uppercase tracking-tighter">Live Fleet Monitor</h1>
-        <div class="badge bg-primary p-2 shadow-sm">
-            <i class="bi bi-broadcast me-2"></i>1Hz Refresh Active
+<style>
+    @((MarkupString)_componentStyles)
+</style>
+
+<div class="container-fluid bg-black min-vh-100 p-4">
+    @* --- TOP METRICS --- *@
+    <div class="row g-3 mb-4">
+        <div class="col-md-3">
+            <div class="kpi-card p-4 shadow-sm text-center">
+                <div class="small text-muted mb-1 text-uppercase fw-bold">Active Units</div>
+                <div class="h1 text-white mb-0 fw-bold text-mono">@GetActiveCount()</div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="kpi-card p-4 shadow-sm text-center">
+                <div class="small text-muted mb-1 text-uppercase fw-bold">Total Fuel</div>
+                <div class="h1 text-danger mb-0 fw-bold text-mono">@GetTotalFuel() <span class="fs-4">L</span></div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="kpi-card p-4 shadow-sm text-center">
+                <div class="small text-muted mb-1 text-uppercase fw-bold">Avg Velocity</div>
+                <div class="h1 text-primary mb-0 fw-bold text-mono">@GetAvgSpeed() <span class="fs-4">km/h</span></div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="kpi-card p-4 shadow-sm text-center">
+                <div class="small text-muted mb-1 text-uppercase fw-bold">Sync Health</div>
+                <div class="h1 text-success mb-0 fw-bold text-mono">100<span class="fs-4">%</span></div>
+            </div>
         </div>
     </div>
 
-    <div class="table-responsive shadow-sm rounded border bg-white">
-        <table class="table table-hover align-middle mb-0">
-            <thead class="table-dark">
+    @* --- FILTERS --- *@
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div class="d-flex gap-3 align-items-center">
+            <h4 class="text-white fw-bold mb-0">TELEMETRY FEED</h4>
+            <input type="text" @bind="_searchQuery" @bind:event="oninput"
+                   placeholder="Search ID or City..." class="search-input" style="width: 250px;" />
+
+            <select @bind="_statusFilter" class="search-input">
+                <option value="All">All Statuses</option>
+                <option value="Moving">Moving</option>
+                <option value="Idle">Idle</option>
+            </select>
+        </div>
+        <div class="text-end">
+            <span class="live-dot"></span>
+            <span class="text-success small fw-bold ms-2">ENGINE ACTIVE</span>
+        </div>
+    </div>
+
+    @* --- DATA TABLE --- *@
+    <div class="table-responsive table-dark-custom">
+        <table class="table table-dark table-hover align-middle mb-0">
+            <thead class="small text-uppercase" style="background: #000;">
                 <tr>
-                    <th class="ps-4">Truck ID</th>
+                    <th class="ps-4 py-3">Asset</th>
+                    <th>Current Route</th>
                     <th>Status</th>
-                    <th>Position (Lat, Lng)</th>
-                    <th>Speed</th>
-                    <th>Fuel</th>
-                    <th class="pe-4 text-end">Last Update</th>
+                    <th>Position</th>
+                    <th>Velocity</th>
+                    <th>Consumption</th>
+                    <th class="pe-4 text-end">Last Sync</th>
                 </tr>
             </thead>
             <tbody>
-                @if (_fleet == null || !_fleet.Any())
+                @foreach (var truck in GetFilteredFleet())
                 {
-                    <tr>
-                        <td colspan="6" class="text-center py-5 text-muted">
-                            <div class="spinner-border spinner-border-sm me-2 text-primary"></div>
-                            Waiting for Telemetry Bridge...
+                    <tr style="border-bottom: 1px solid #1f1f1f;">
+                        <td class="ps-4">
+                            <span class="text-primary fw-bold">TRK-@truck.TruckId.ToString("D3")</span>
+                        </td>
+                        <td>
+                            <span class="text-white-50"><i class="bi bi-geo-alt me-1 text-info"></i>@truck.RouteName</span>
+                        </td>
+                        <td>
+                            <span class="badge @(truck.Speed > 5 ? "bg-success" : "bg-secondary")">
+                                @(truck.Speed > 5 ? "MOVING" : "IDLE")
+                            </span>
+                        </td>
+                        <td class="text-mono small text-info">
+                            @truck.Latitude.ToString("F3"), @truck.Longitude.ToString("F3")
+                        </td>
+                        <td>
+                            <span class="fw-bold fs-5">@truck.Speed.ToString("F1")</span> <span class="text-muted small">km/h</span>
+                        </td>
+                        <td class="text-danger fw-bold">@truck.FuelConsumed.ToString("F1") L</td>
+                        <td class="pe-4 text-end text-muted text-mono small">
+                            @((DateTime.Now - truck.LastUpdated).TotalSeconds.ToString("F1"))s
                         </td>
                     </tr>
-                }
-                else
-                {
-                    @foreach (var truck in _fleet)
-                    {
-                        <tr>
-                            <td class="ps-4 fw-bold text-primary">#@truck.TruckId</td>
-                            <td>
-                                <span class="badge @(truck.Status == "Moving" ? "bg-success" : "bg-secondary")">
-                                    @truck.Status
-                                </span>
-                            </td>
-                            <td class="font-monospace small">
-                                @truck.Latitude.ToString("F4"), @truck.Longitude.ToString("F4")
-                            </td>
-                            <td><span class="fw-bold">@truck.Speed.ToString("F1")</span> <small class="text-muted">km/h</small></td>
-                            <td><span class="text-danger fw-bold">@truck.FuelConsumed.ToString("F2")</span> <small class="text-muted">L</small></td>
-                            <td class="pe-4 text-end text-muted small">@truck.LastUpdated.ToString("HH:mm:ss")</td>
-                        </tr>
-                    }
                 }
             </tbody>
         </table>
@@ -68,14 +111,30 @@
 
 @code {
     private IEnumerable<TruckDisplayVm> _fleet = new List<TruckDisplayVm>();
+    private string _searchQuery = "";
+    private string _statusFilter = "All";
 
-    [CascadingParameter]
-    private Task<AuthenticationState>? AuthStateTask { get; set; }
+    [CascadingParameter] private Task<AuthenticationState>? AuthStateTask { get; set; }
 
-    protected override void OnInitialized()
-    {
-        _fleet = StateService.GetFormattedFleet();
-    }
+    private const string _componentStyles = @"
+        @keyframes status-pulse {
+            0% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.4; transform: scale(1.2); }
+            100% { opacity: 1; transform: scale(1); }
+        }
+        .live-dot {
+            width: 10px; height: 10px; background-color: #28a745; border-radius: 50%;
+            display: inline-block; animation: status-pulse 2s infinite;
+        }
+        .kpi-card { background: #161616; border-top: 2px solid #333; transition: all 0.3s ease; border-radius: 8px; }
+        .kpi-card:hover { border-top-color: #0d6efd; background: #1c1c1c; }
+        .table-dark-custom { background: #161616; border: 1px solid #222; border-radius: 8px; overflow: hidden; }
+        .search-input { background: #000; border: 1px solid #333; color: white; border-radius: 4px; padding: 6px 12px; }
+        .text-mono { font-family: ui-monospace, 'Cascadia Code', monospace; }
+        .table-dark { --bs-table-bg: transparent !important; }
+    ";
+
+    protected override void OnInitialized() => _fleet = StateService.GetFormattedFleet();
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -89,11 +148,7 @@
                     await SignalR.StartAsync();
                     SignalR.OnFleetReceived += HandleUpdate;
                 }
-                catch (Exception ex)
-                {
-                    // Catch 401 or connection errors to prevent UI crash
-                    Console.WriteLine($"SignalR Startup Deferred: {ex.Message}");
-                }
+                catch { }
             }
         }
     }
@@ -104,8 +159,28 @@
         InvokeAsync(StateHasChanged);
     }
 
-    public void Dispose()
+    private IEnumerable<TruckDisplayVm> GetFilteredFleet()
     {
-        SignalR.OnFleetReceived -= HandleUpdate;
+        var result = _fleet;
+
+        if (!string.IsNullOrWhiteSpace(_searchQuery))
+        {
+            result = result.Where(x =>
+                x.TruckId.ToString().Contains(_searchQuery) ||
+                $"TRK-{x.TruckId:D3}".Contains(_searchQuery, StringComparison.OrdinalIgnoreCase) ||
+                x.RouteName.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase) // Added Route Search
+            );
+        }
+
+        if (_statusFilter == "Moving") result = result.Where(x => x.Speed > 5);
+        if (_statusFilter == "Idle") result = result.Where(x => x.Speed <= 5);
+
+        return result.OrderByDescending(x => x.Speed);
     }
+
+    private int GetActiveCount() => _fleet?.Count(x => x.Speed > 5) ?? 0;
+    private string GetTotalFuel() => _fleet?.Sum(x => x.FuelConsumed).ToString("N1") ?? "0.0";
+    private string GetAvgSpeed() => _fleet?.Any() == true ? _fleet.Average(x => x.Speed).ToString("F1") : "0.0";
+
+    public void Dispose() => SignalR.OnFleetReceived -= HandleUpdate;
 }

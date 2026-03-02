@@ -2,77 +2,106 @@
 using Microsoft.Data.Sqlite;
 using EasyLogistics.Telemetry.System.Core.Interfaces;
 using EasyLogistics.Telemetry.System.Core.Models;
+using EasyLogistics.Telemetry.System.Core.Entities;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using System.Linq;
+using Microsoft.Extensions.Hosting; // PRO: Use generic Hosting Abstractions
 
 namespace EasyLogistics.Telemetry.System.Infrastructure.Persistence;
 
-/// <summary>
-/// High-performance SQLite persistence layer using Dapper.
-/// Aligned with IFleetRepository. Handles binary struct-to-DB mapping.
-/// </summary>
 public sealed class DapperFleetRepository : IFleetRepository
 {
     private readonly string _connectionString;
     private readonly ILogger<DapperFleetRepository> _logger;
-    private readonly string _absoluteDbPath;
 
-    public DapperFleetRepository(IConfiguration config, ILogger<DapperFleetRepository> logger)
+    // Use IHostEnvironment instead of IWebHostEnvironment for Infrastructure purity
+    public DapperFleetRepository(IConfiguration config, ILogger<DapperFleetRepository> logger, IHostEnvironment env)
     {
         _logger = logger;
 
-        // Verify the Anchor Path - Hardcoded as requested for local stability
-        _absoluteDbPath = @"C:\Users\macim\FinalProject\EasyLogistics\src\EasyLogistics.Telemetry.System.Web\EasyLogistics.db";
-        _connectionString = $"Data Source={_absoluteDbPath};Cache=Shared";
+        // PRO: Resolve DB path relative to ContentRoot
+        string dbPath = Path.Combine(env.ContentRootPath, "EasyLogistics.db");
+        _connectionString = $"Data Source={dbPath};Cache=Shared";
 
         InitializeDatabase();
     }
 
     public void InitializeDatabase()
     {
-        using var conn = new SqliteConnection(_connectionString);
-        conn.Open();
+        try
+        {
+            using var conn = new SqliteConnection(_connectionString);
+            conn.Open();
 
-        // Noah Gift Principle: Optimize for Write Performance (WAL Mode)
-        conn.Execute("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;");
+            // WAL mode for high-frequency writes
+            conn.Execute("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;");
 
-        // Telemetry History Table
-        conn.Execute(@"
-            CREATE TABLE IF NOT EXISTS TruckHistory (
-                Id INTEGER PRIMARY KEY AUTOINCREMENT,
-                TruckId INTEGER NOT NULL,
-                Latitude REAL NOT NULL,
-                Longitude REAL NOT NULL,
-                Speed REAL NOT NULL,
-                FuelConsumed REAL NOT NULL,
-                DistanceTraveled REAL NOT NULL,
-                TotalCost REAL NOT NULL,
-                Timestamp INTEGER NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS IX_TruckHistory_TruckId_Timestamp ON TruckHistory(TruckId, Timestamp DESC);");
+            // 1. Current State
+            conn.Execute(@"
+                CREATE TABLE IF NOT EXISTS Trucks (
+                    TruckId INTEGER PRIMARY KEY,
+                    Latitude REAL NOT NULL,
+                    Longitude REAL NOT NULL,
+                    Speed REAL NOT NULL,
+                    Status TEXT NOT NULL,
+                    FuelConsumed REAL NOT NULL,
+                    DistanceTraveled REAL NOT NULL,
+                    TotalCost REAL NOT NULL,
+                    LastUpdated TEXT NOT NULL,
+                    OriginLat REAL, OriginLon REAL,
+                    TargetLat REAL, TargetLon REAL
+                );");
 
-        // Identity Table (Dapper User Store)
-        conn.Execute(@"
-            CREATE TABLE IF NOT EXISTS AspNetUsers (
-                Id TEXT PRIMARY KEY,
-                UserName TEXT,
-                NormalizedUserName TEXT,
-                Email TEXT,
-                NormalizedEmail TEXT,
-                PasswordHash TEXT,
-                SecurityStamp TEXT,
-                ConcurrencyStamp TEXT,
-                FirstName TEXT,
-                LastName TEXT,
-                JoinedDate TEXT,
-                IsActive INTEGER
-            );");
+            // 2. Telemetry History
+            conn.Execute(@"
+                CREATE TABLE IF NOT EXISTS TruckHistory (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    TruckId INTEGER NOT NULL,
+                    Latitude REAL NOT NULL,
+                    Longitude REAL NOT NULL,
+                    Speed REAL NOT NULL,
+                    FuelConsumed REAL NOT NULL,
+                    DistanceTraveled REAL NOT NULL,
+                    TotalCost REAL NOT NULL,
+                    Timestamp INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS IX_TruckHistory_Lookup ON TruckHistory(TruckId, Timestamp DESC);");
+
+            // 3. Identity
+            conn.Execute(@"
+                CREATE TABLE IF NOT EXISTS AspNetUsers (
+                    Id TEXT PRIMARY KEY,
+                    UserName TEXT,
+                    NormalizedUserName TEXT,
+                    Email TEXT,
+                    NormalizedEmail TEXT,
+                    PasswordHash TEXT,
+                    FirstName TEXT,
+                    LastName TEXT,
+                    JoinedDate TEXT,
+                    IsActive INTEGER
+                );");
+
+            SeedInitialFleet(conn);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogCritical(ex, "FATAL: Database initialization failed.");
+        }
     }
 
-    /// <summary>
-    /// FIXED: Explicitly maps Struct Fields to Dapper Parameters to prevent the 404/Crash.
-    /// </summary>
+    private void SeedInitialFleet(SqliteConnection conn)
+    {
+        var count = conn.ExecuteScalar<int>("SELECT COUNT(*) FROM Trucks");
+        if (count == 0)
+        {
+            conn.Execute(@"
+                INSERT INTO Trucks (TruckId, Latitude, Longitude, Speed, Status, FuelConsumed, DistanceTraveled, TotalCost, LastUpdated)
+                VALUES (1, 44.8186, 20.4689, 0, 'Idle', 0, 0, 0, datetime('now'))");
+            _logger.LogInformation("🌱 Database Seeded: Initial fleet state created.");
+        }
+    }
+
     public async Task SaveSnapshotAsync(IEnumerable<TruckTelemetry> fleet)
     {
         if (fleet == null || !fleet.Any()) return;
@@ -81,28 +110,19 @@ public sealed class DapperFleetRepository : IFleetRepository
             INSERT INTO TruckHistory (TruckId, Latitude, Longitude, Speed, FuelConsumed, DistanceTraveled, TotalCost, Timestamp)
             VALUES (@TruckId, @Latitude, @Longitude, @Speed, @FuelConsumed, @DistanceTraveled, @TotalCost, @Timestamp)";
 
+        using var conn = new SqliteConnection(_connectionString);
+        await conn.OpenAsync();
+        using var transaction = conn.BeginTransaction();
+
         try
         {
-            using var conn = new SqliteConnection(_connectionString);
-
-            // Dapper cannot "see" fields in a struct. We must project to an anonymous type.
-            var projectedParams = fleet.Select(f => new {
-                f.TruckId,
-                f.Latitude,
-                f.Longitude,
-                f.Speed,
-                f.FuelConsumed,
-                f.DistanceTraveled,
-                f.TotalCost,
-                f.Timestamp
-            });
-
-            await conn.ExecuteAsync(sql, projectedParams);
+            await conn.ExecuteAsync(sql, fleet, transaction);
+            await transaction.CommitAsync();
         }
         catch (Exception ex)
         {
-            // Logging prevents the BackgroundService from dying (and the 404/SignalR drop)
-            _logger.LogError(ex, "[DB] Write transaction failed for fleet snapshot mapping.");
+            _logger.LogError(ex, "[DB] Snapshot batch write failed.");
+            await transaction.RollbackAsync();
         }
     }
 
@@ -116,15 +136,7 @@ public sealed class DapperFleetRepository : IFleetRepository
                 FROM TruckHistory
             ) WHERE rn = 1";
 
-        try
-        {
-            return await conn.QueryAsync<TruckTelemetry>(sql);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "[DB] Failed to fetch latest fleet positions");
-            return Enumerable.Empty<TruckTelemetry>();
-        }
+        return await conn.QueryAsync<TruckTelemetry>(sql);
     }
 
     public async Task<IEnumerable<TruckTelemetry>> GetHistoryByIdAsync(int truckId)

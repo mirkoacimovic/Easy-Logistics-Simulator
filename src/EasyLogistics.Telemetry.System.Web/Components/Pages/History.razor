@@ -1,0 +1,90 @@
+﻿@page "/history"
+@page "/history/{TruckId:int}"
+@using EasyLogistics.Telemetry.System.Core.Interfaces
+@using EasyLogistics.Telemetry.System.Core.Models
+@inject IFleetRepository Repository
+@inject NavigationManager Nav
+@attribute [StreamRendering]
+
+<PageTitle>Fleet Audit Trail</PageTitle>
+
+<div class="container-fluid pt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="text-white"><i class="bi bi-clock-history me-2"></i>Telemetry Audit Trail</h2>
+        <div class="btn-group">
+            <button class="btn btn-outline-secondary btn-sm" @onclick='() => Nav.NavigateTo("/history")'>View All</button>
+            <button class="btn btn-primary btn-sm" @onclick='() => Nav.NavigateTo("/")'>Back to Map</button>
+        </div>
+    </div>
+
+    @if (_history == null)
+    {
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status"></div>
+            <p class="text-muted mt-2">Retrieving telemetry archives...</p>
+        </div>
+    }
+    else if (!_history.Any())
+    {
+        <div class="alert alert-dark border-secondary text-center">
+            <i class="bi bi-exclamation-triangle me-2"></i> No telemetry data found in the archive.
+        </div>
+    }
+    else
+    {
+        <div class="card bg-dark border-secondary shadow">
+            <div class="table-responsive">
+                <table class="table table-dark table-hover mb-0">
+                    <thead class="table-group-divider border-secondary">
+                        <tr>
+                            <th>Truck ID</th>
+                            <th>Timestamp</th>
+                            <th>Coordinates</th>
+                            <th>Speed</th>
+                            <th>Fuel Burned</th>
+                            <th>Distance</th>
+                            <th>Total Cost</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var entry in _history)
+                        {
+                            <tr>
+                                <td class="fw-bold text-primary">TRK-@entry.TruckId.ToString("D3")</td>
+                                <td class="text-muted">@entry.FormattedTime</td>
+                                <td><small>@entry.Latitude.ToString("F4"), @entry.Longitude.ToString("F4")</small></td>
+                                <td>
+                                    <span class="badge @(entry.Speed > 0 ? "bg-success" : "bg-secondary")">
+                                        @entry.Speed.ToString("F1") km/h
+                                    </span>
+                                </td>
+                                <td>@entry.FuelConsumed.ToString("F2") L</td>
+                                <td>@entry.DistanceTraveled.ToString("F1") km</td>
+                                <td class="text-info">$@entry.TotalCost.ToString("F2")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public int? TruckId { get; set; }
+    private IEnumerable<TruckTelemetry>? _history;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (TruckId.HasValue)
+        {
+            // Fetch history for specific truck
+            _history = await Repository.GetHistoryByIdAsync(TruckId.Value);
+        }
+        else
+        {
+            // Fetch latest fleet-wide activity
+            _history = await Repository.GetLatestPositionsAsync();
+        }
+    }
+}

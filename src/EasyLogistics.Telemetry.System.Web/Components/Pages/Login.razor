@@ -3,9 +3,11 @@
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Identity
 @using EasyLogistics.Telemetry.System.Core.Entities
-@* This is the ONLY page allowed to bypass the lock *@
+@using Microsoft.AspNetCore.Authentication
+@* This page must be Static SSR to allow the Cookie to be set in the Response Headers *@
 @attribute [AllowAnonymous]
 @inject SignInManager<ApplicationUser> SignInManager
+@inject UserManager<ApplicationUser> UserManager
 @inject NavigationManager NavigationManager
 
 <PageTitle>Login - Fleet Engine</PageTitle>
@@ -14,48 +16,97 @@
     <div class="card shadow-lg border-0" style="width: 100%; max-width: 400px;">
         <div class="card-header bg-dark text-white text-center py-3">
             <h4 class="mb-0">FLEET COMMAND</h4>
+            <small class="text-secondary">Phase 3: Environment Configuration</small>
         </div>
         <div class="card-body p-4">
-            <EditForm Model="Input" OnValidSubmit="HandleLogin" FormName="FleetLoginForm">
+            @* We use standard Form post to a native handler to ensure the Cookie 'sticks' *@
+            <EditForm Model="Input" OnValidSubmit="HandleLogin" FormName="FleetLoginForm" method="post">
                 <DataAnnotationsValidator />
 
                 <div class="mb-3">
-                    <label class="form-label">Email</label>
-                    <InputText @bind-Value="Input.Email" class="form-control" placeholder="admin@fleet.local" />
+                    <label class="form-label fw-bold">Email</label>
+                    <InputText @bind-Value="Input.Email" class="form-control form-control-lg" placeholder="admin@fleet.local" autocomplete="username" />
+                    <ValidationMessage For="() => Input.Email" class="text-danger small" />
                 </div>
 
                 <div class="mb-3">
-                    <label class="form-label">Password</label>
-                    <InputText @bind-Value="Input.Password" type="password" class="form-control" />
+                    <label class="form-label fw-bold">Password</label>
+                    <InputText @bind-Value="Input.Password" type="password" class="form-control form-control-lg" autocomplete="current-password" />
+                    <ValidationMessage For="() => Input.Password" class="text-danger small" />
                 </div>
 
-                <button type="submit" class="btn btn-primary w-100 py-2">AUTHENTICATE</button>
+                @if (!string.IsNullOrEmpty(_errorMessage))
+                {
+                    <div class="alert alert-danger py-2 small">
+                        @_errorMessage
+                    </div>
+                }
+
+                <button type="submit" class="btn btn-primary w-100 py-2 fw-bold shadow-sm">AUTHENTICATE</button>
             </EditForm>
+        </div>
+        <div class="card-footer bg-light text-center py-2">
+            <span class="text-muted x-small">v2026.02 - Secure Identity Anchor</span>
         </div>
     </div>
 </div>
 
 @code {
+    private string? _errorMessage;
+
     [SupplyParameterFromForm]
     public LoginInput Input { get; set; } = new();
 
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    protected override void OnInitialized()
+    {
+        // If already logged in, get out of here
+        if (HttpContext.User.Identity?.IsAuthenticated == true)
+        {
+            NavigationManager.NavigateTo("/analytics");
+        }
+    }
+
     private async Task HandleLogin()
     {
-        var result = await SignInManager.PasswordSignInAsync(Input.Email, Input.Password, false, false);
+        _errorMessage = null;
+
+        // 1. Clean identity lookup
+        var user = await UserManager.FindByEmailAsync(Input.Email);
+        if (user == null)
+        {
+            _errorMessage = "Identity not recognized.";
+            return;
+        }
+
+        // 2. Attempt the actual Cookie Sign-In
+        // This works here because we are in Static SSR mode (no InteractiveServer attribute)
+        var result = await SignInManager.PasswordSignInAsync(user, Input.Password, isPersistent: false, lockoutOnFailure: false);
+
         if (result.Succeeded)
         {
-            // Refresh the whole browser state to pick up the new Identity cookie
-            NavigationManager.NavigateTo("/", forceLoad: true);
+            // 3. Force load to the dashboard to initialize the Interactive circuit with the new cookie
+            NavigationManager.NavigateTo("/analytics", forceLoad: true);
+        }
+        else if (result.IsLockedOut)
+        {
+            _errorMessage = "Account locked.";
         }
         else
         {
-            // Add error handling here if needed
+            _errorMessage = "Invalid Access Code.";
         }
     }
 
     public class LoginInput
     {
-        [Required] public string Email { get; set; } = "";
-        [Required] public string Password { get; set; } = "";
+        [Required(ErrorMessage = "Email is required")]
+        [EmailAddress]
+        public string Email { get; set; } = "";
+
+        [Required(ErrorMessage = "Password is required")]
+        public string Password { get; set; } = "";
     }
 }
