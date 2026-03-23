@@ -1,4 +1,4 @@
-﻿@page "/history"
+﻿@* @page "/history"
 @page "/history/{TruckId:int}"
 @using EasyLogistics.Telemetry.System.Core.Interfaces
 @using EasyLogistics.Telemetry.System.Core.Models
@@ -12,7 +12,7 @@
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h2 class="text-white"><i class="bi bi-clock-history me-2"></i>Telemetry Audit Trail</h2>
         <div class="btn-group">
-            <button class="btn btn-outline-secondary btn-sm" @onclick='() => Nav.NavigateTo("/history")'>View All</button>
+            <button class="btn btn-outline-info btn-sm" @onclick='() => Nav.NavigateTo("/history", true)'>Force Refresh</button>
             <button class="btn btn-primary btn-sm" @onclick='() => Nav.NavigateTo("/")'>Back to Map</button>
         </div>
     </div>
@@ -21,13 +21,14 @@
     {
         <div class="text-center py-5">
             <div class="spinner-border text-primary" role="status"></div>
-            <p class="text-muted mt-2">Retrieving telemetry archives...</p>
+            <p class="text-muted mt-2">Loading historical data...</p>
         </div>
     }
     else if (!_history.Any())
     {
         <div class="alert alert-dark border-secondary text-center">
-            <i class="bi bi-exclamation-triangle me-2"></i> No telemetry data found in the archive.
+            <i class="bi bi-database-exclamation me-2"></i> No telemetry data found in the archive.
+            <br /><small class="text-muted">The worker saves data every 5 seconds. If this persists, check the bridge connection.</small>
         </div>
     }
     else
@@ -35,56 +36,163 @@
         <div class="card bg-dark border-secondary shadow">
             <div class="table-responsive">
                 <table class="table table-dark table-hover mb-0">
-                    <thead class="table-group-divider border-secondary">
-                        <tr>
-                            <th>Truck ID</th>
-                            <th>Timestamp</th>
-                            <th>Coordinates</th>
-                            <th>Speed</th>
-                            <th>Fuel Burned</th>
-                            <th>Distance</th>
-                            <th>Total Cost</th>
+                    <thead>
+                        <tr class="text-muted small">
+                            <th>TRUCK ID</th>
+                            <th>TIMESTAMP</th>
+                            <th>LOCATION</th>
+                            <th>SPEED</th>
+                            <th>FUEL USED</th>
+                            <th>TOTAL DISTANCE</th>
                         </tr>
                     </thead>
                     <tbody>
-                        @foreach (var entry in _history)
+                        @if (_history != null)
                         {
-                            <tr>
-                                <td class="fw-bold text-primary">TRK-@entry.TruckId.ToString("D3")</td>
-                                <td class="text-muted">@entry.FormattedTime</td>
-                                <td><small>@entry.Latitude.ToString("F4"), @entry.Longitude.ToString("F4")</small></td>
-                                <td>
-                                    <span class="badge @(entry.Speed > 0 ? "bg-success" : "bg-secondary")">
-                                        @entry.Speed.ToString("F1") km/h
-                                    </span>
-                                </td>
-                                <td>@entry.FuelConsumed.ToString("F2") L</td>
-                                <td>@entry.DistanceTraveled.ToString("F1") km</td>
-                                <td class="text-info">$@entry.TotalCost.ToString("F2")</td>
-                            </tr>
+                            @foreach (var entry in _history)
+                            {
+                                <tr>
+                                    <td class="text-primary fw-bold">#@entry.TruckId.ToString("D3")</td>
+                                    <td>@entry.LastUpdated</td>
+                                    <td>
+                                        <span class="badge @(entry.AiStatus.Contains("🚨") ? "bg-danger" : "border border-success text-success")">
+                                            @entry.AiStatus
+                                        </span>
+                                    </td>
+                                    <td>@entry.Speed.ToString("F1") km/h</td>
+                                    <td class="text-info">$@entry.TotalCost.ToString("F2")</td>
+                                </tr>
+                            }
                         }
                     </tbody>
                 </table>
             </div>
         </div>
     }
-</div>
+</div> *@
 
-@code {
-    [Parameter] public int? TruckId { get; set; }
-    private IEnumerable<TruckTelemetry>? _history;
+@page "/history"
+@using EasyLogistics.Telemetry.System.Core.Interfaces
+@using EasyLogistics.Telemetry.System.Core.Models
+@inject IFleetRepository Repository
 
-    protected override async Task OnInitializedAsync()
-    {
-        if (TruckId.HasValue)
+<div class="container-fluid py-4 bg-black min-vh-100">
+    <div class="d-flex justify-content-between align-items-center mb-4 border-bottom border-secondary pb-2">
+        <h2 class="text-white fw-light">
+            <span class="live-indicator"></span>FLEET_<span class="text-info">AI</span>_TERMINAL <small class="text-muted fs-6">v1.0.5</small>
+        </h2>
+        <button class="btn btn-outline-info btn-sm font-monospace" @onclick="RefreshData">
+            <i class="bi bi-arrow-repeat"></i> RE-SYNC
+        </button>
+    </div>
+
+    <div class="row">
+        @if (_history == null)
         {
-            // Fetch history for specific truck
-            _history = await Repository.GetHistoryByIdAsync(TruckId.Value);
+            <div class="col-12 text-center p-5">
+                <div class="spinner-border text-info mb-3" role="status"></div>
+                <div class="text-muted font-monospace ls-1">SYNCHRONIZING_DATA_STREAM...</div>
+            </div>
+        }
+        else if (!_history.Any())
+        {
+            <div class="col-12">
+                <div class="alert alert-dark border-secondary text-center font-monospace">
+                    <i class="bi bi-exclamation-triangle text-warning me-2"></i> NO_ARCHIVED_TELEMETRY_FOUND
+                </div>
+            </div>
         }
         else
         {
-            // Fetch latest fleet-wide activity
-            _history = await Repository.GetLatestPositionsAsync();
+            @foreach (var truck in _history)
+            {
+                <div class="col-12 mb-2">
+                    <div class="cyber-card p-3 d-flex flex-wrap justify-content-between align-items-center border border-secondary rounded bg-dark shadow-sm">
+                        <div style="min-width: 120px;">
+                            <div class="text-muted small ls-1">UNIT_ID</div>
+                            <div class="h5 mb-0 text-primary font-monospace">#@truck.TruckId.ToString("D3")</div>
+                        </div>
+
+                        <div class="flex-grow-1 px-4">
+                            <div class="text-muted small ls-1">AI_DIAGNOSTIC</div>
+                            <div class="@truck.SeverityClass font-monospace">@truck.AiStatus</div>
+                        </div>
+
+                        <div class="text-center px-4">
+                            <div class="text-muted small ls-1">VELOCITY</div>
+                            <div class="text-white fw-bold font-monospace">@truck.Speed.ToString("F1") <small class="text-muted">KM/H</small></div>
+                        </div>
+
+                        <div class="text-center px-4">
+                            <div class="text-muted small ls-1">ODOMETER</div>
+                            <div class="text-white font-monospace">@truck.DistanceTraveled.ToString("F1") <small class="text-muted">KM</small></div>
+                        </div>
+
+                        <div class="text-end" style="min-width: 150px;">
+                            <div class="text-muted small ls-1">LAST_PULSE</div>
+                            <div class="text-info font-monospace">@truck.LastUpdated</div>
+                        </div>
+                    </div>
+                </div>
+            }
         }
+    </div>
+</div>
+
+<style>
+    .ls-1 {
+        letter-spacing: 1px;
+    }
+
+    .live-indicator {
+        display: inline-block;
+        width: 10px;
+        height: 10px;
+        background-color: #10b981;
+        border-radius: 50%;
+        margin-right: 10px;
+        box-shadow: 0 0 8px #10b981;
+        animation: cyber-blink 2s infinite;
+    }
+
+    .cyber-card {
+        background: rgba(30, 41, 59, 0.7);
+        border-left: 4px solid #38bdf8;
+        border-radius: 4px;
+        margin-bottom: 1rem;
+        padding: 1rem;
+        transition: transform 0.2s;
+    }
+
+    .blink {
+        animation: cyber-blink 1.5s infinite;
+    }
+
+    /* We inject the keyframes as a string so the CSS validator skips it */
+    @((MarkupString)_cyberAnimation)
+</style>
+
+@code {
+
+    private const string _cyberAnimation = @"
+        @keyframes cyber-blink {
+            from { opacity: 1.0; }
+            50% { opacity: 0.3; }
+            to { opacity: 1.0; }
+        }";
+
+    private IEnumerable<TruckDisplayVm>? _history;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshData();
+    }
+
+    private async Task RefreshData()
+    {
+        _history = null;
+        // Force a small delay to show the terminal 'SYNCHRONIZING' feel
+        await Task.Delay(300);
+        _history = await Repository.GetLatestPositionsAsync();
     }
 }

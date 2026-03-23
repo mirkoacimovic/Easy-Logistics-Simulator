@@ -1,0 +1,40 @@
+# --- STAGE 1: Build .NET ---
+FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
+WORKDIR /src
+
+# Copy and restore .NET projects
+COPY src/*/*.csproj ./
+RUN for file in $(ls *.csproj); do mkdir -p "src/${file%.*}/" && mv "$file" "src/${file%.*}/"; done
+RUN dotnet restore "src/EasyLogistics.Telemetry.System.Web/EasyLogistics.Telemetry.System.Web.csproj"
+
+# Copy full source and publish
+COPY . .
+WORKDIR "/src/src/EasyLogistics.Telemetry.System.Web"
+RUN dotnet publish -c Release -o /app/publish /p:UseAppHost=false
+
+# --- STAGE 2: Final Runtime (The Unified Box) ---
+FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS final
+WORKDIR /app
+
+# 1. Install Python 3 and Pip
+RUN apt-get update && apt-get install -y python3 python3-pip && rm -rf /var/lib/apt/lists/*
+
+# 2. Copy .NET binaries
+COPY --from=build /app/publish .
+
+# 3. Copy Python Engine from your src folder
+COPY src/EasyLogistics.Telemetry.System.Engine/ ./engine/
+
+# 4. Install Python dependencies (break-system-packages is required for Debian 12+)
+RUN pip3 install -r ./engine/requirements.txt --break-system-packages --no-cache-dir
+
+# 5. Create the shared data directory
+RUN mkdir -p /app/data && chmod -R 777 /app/data
+
+# Environment Setup
+ENV ASPNETCORE_URLS=http://+:8080
+ENV PORT=8080
+EXPOSE 8080
+
+# 🚀 THE IGNITION: Start Python in background (&) then start .NET
+ENTRYPOINT ["sh", "-c", "python3 ./engine/engine.py & dotnet EasyLogistics.Telemetry.System.Web.dll"]

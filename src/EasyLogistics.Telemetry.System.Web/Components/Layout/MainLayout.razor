@@ -4,34 +4,33 @@
 <div class="page">
     <AuthorizeView>
         <Authorized>
-            @* The outer 'context' belongs to this AuthorizeView *@
             <div class="sidebar">
                 <NavMenu />
             </div>
 
             <main>
                 <div class="top-row px-4 border-bottom bg-white d-flex align-items-center justify-content-between">
-                    <span class="fw-bold text-uppercase">Fleet Engine v1.0</span>
-
-                    @* Rename the inner context to 'userContext' to avoid the conflict *@
-                    <AuthorizeView Context="userContext">
-                        <span class="text-muted small">
-                            <i class="bi bi-person-circle me-1"></i>
-                            User: @userContext.User.Identity?.Name
-                        </span>
-                    </AuthorizeView>
+                    <span class="fw-bold text-primary">FLEET ENGINE v1.0</span>
+                    <span class="badge bg-light text-dark border small">
+                        <i class="bi bi-person-circle me-1"></i> @context.User.Identity?.Name
+                    </span>
                 </div>
 
-                <article class="content px-4">
+                <article class="content px-4 py-3">
                     @Body
                 </article>
             </main>
         </Authorized>
         <NotAuthorized>
-            @* Use the full body for the Login page so it remains centered/black *@
-            <main>
+            <main class="bg-dark d-flex align-items-center justify-content-center" style="min-height: 100vh; background: radial-gradient(circle, #2c2c2c 0%, #000000 100%);">
                 @Body
             </main>
         </NotAuthorized>
     </AuthorizeView>
+</div>
+
+<div id="blazor-error-ui">
+    An unhandled error has occurred.
+    <a href="" class="reload">Reload</a>
+    <a class="dismiss">🗙</a>
 </div>

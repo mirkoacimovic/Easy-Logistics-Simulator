@@ -3,78 +3,90 @@ using EasyLogistics.Telemetry.System.Core.Interfaces;
 using EasyLogistics.Telemetry.System.Core.Models;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using System.Collections.Concurrent;
-using System.Data;
 
 namespace EasyLogistics.Telemetry.System.Infrastructure.Services;
 
 public class FleetStateService : IFleetStateService
 {
-    private readonly ConcurrentDictionary<int, TruckTelemetry> _latestStats = new();
-    private readonly FleetSettings _settings;
     private readonly ILogger<FleetStateService> _logger;
+    private readonly FleetSettings _settings;
+    private readonly object _lock = new();
+    private List<TruckDisplayVm> _currentFleet = new();
 
     public event Action<List<TruckDisplayVm>>? OnFleetUpdated;
 
-    public FleetStateService(IDbConnection db, ILogger<FleetStateService> logger, IOptions<FleetSettings> settings)
+    public FleetStateService(ILogger<FleetStateService> logger, IOptions<FleetSettings> settings)
     {
         _logger = logger;
         _settings = settings.Value;
     }
 
-    public async Task UpdateFleet(IEnumerable<TruckTelemetry> snapshots)
-    {
-        bool changed = false;
-        foreach (var truck in snapshots)
-        {
-            _latestStats[truck.TruckId] = truck;
-            changed = true;
-        }
-
-        if (changed && OnFleetUpdated != null)
-        {
-            OnFleetUpdated.Invoke(GetFormattedFleet());
-        }
-        await Task.CompletedTask;
-    }
-
+    /// <summary>
+    /// Returns a thread-safe snapshot of the current fleet state.
+    /// Used by the Sidebar to count "SPEEDING" trucks.
+    /// </summary>
     public List<TruckDisplayVm> GetFormattedFleet()
     {
-        return _latestStats.Values.Select(t => new TruckDisplayVm
+        lock (_lock)
         {
-            TruckId = t.TruckId,
-            Latitude = t.Latitude,
-            Longitude = t.Longitude,
-            Speed = Math.Round(t.Speed, 1),
-            FuelConsumed = t.FuelConsumed,
-            DistanceTraveled = t.DistanceTraveled,
-            TotalCost = t.TotalCost,
-            Status = t.Speed > 5 ? "Moving" : "Idle",
-            RouteName = ResolveRoute(t.Latitude, t.Longitude),
-            LastUpdated = t.FormattedTime
-        }).ToList();
+            return _currentFleet.ToList();
+        }
     }
 
-    private string ResolveRoute(double lat, double lng)
+    /// <summary>
+    /// Processes raw telemetry from the Python Bridge, 
+    /// applies business rules, and notifies subscribers.
+    /// </summary>
+    public async Task UpdateFleet(IEnumerable<TruckTelemetry> rawData)
     {
-        if (_settings.LogisticsHubs == null || !_settings.LogisticsHubs.Any())
+        if (rawData == null) return;
+
+        // One-pass mapping and rule application
+        var mapped = rawData.Select(t => {
+
+            // Logic derived from simulation thresholds
+            string status = "STATIONARY";
+            string severity = "text-success";
+            string aiStatus = "NOMINAL: STEADY";
+
+            if (t.Speed > 90.0)
+            {
+                status = "CRITICAL";
+                severity = "text-danger fw-bold blink";
+                aiStatus = "CRITICAL: OVERSPEED";
+            }
+            else if (t.Speed > 1.0)
+            {
+                status = "IN_TRANSIT";
+                severity = "text-primary";
+                aiStatus = "NOMINAL: ACTIVE";
+            }
+
+            return new TruckDisplayVm
+            {
+                TruckId = t.TruckId,
+                Latitude = t.Latitude,
+                Longitude = t.Longitude,
+                Speed = t.Speed,
+                FuelConsumed = t.FuelConsumed,
+                DistanceTraveled = t.DistanceTraveled,
+                TotalCost = t.TotalCost,
+                Timestamp = t.Timestamp,
+                Status = status,
+                SeverityClass = severity,
+                AiStatus = aiStatus,
+                LastUpdated = DateTime.Now.ToString("HH:mm:ss"),
+                DriverName = $"UNIT_{t.TruckId:D3}"
+            };
+        }).ToList();
+
+        lock (_lock)
         {
-            _logger.LogWarning("Route resolution failed: No hubs in configuration.");
-            return "Global Route";
+            _currentFleet = mapped;
         }
 
-        var closestHubs = _settings.LogisticsHubs
-            .Select(h => new {
-                h.Name,
-                Distance = Math.Sqrt(Math.Pow(h.Lat - lat, 2) + Math.Pow(h.Lng - lng, 2))
-            })
-            .OrderBy(h => h.Distance)
-            .ToList();
+        OnFleetUpdated?.Invoke(mapped);
 
-        var primary = closestHubs[0];
-        if (primary.Distance < 0.08) return $"At {primary.Name} Hub";
-
-        var secondary = closestHubs.Skip(1).FirstOrDefault();
-        return secondary != null ? $"{primary.Name} - {secondary.Name}" : $"{primary.Name} Regional";
+        await Task.CompletedTask;
     }
 }

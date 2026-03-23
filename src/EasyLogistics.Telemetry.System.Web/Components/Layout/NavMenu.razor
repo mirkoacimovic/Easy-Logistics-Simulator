@@ -1,71 +1,88 @@
 ﻿@using Microsoft.AspNetCore.Components.Authorization
+@using EasyLogistics.Telemetry.System.Core.Interfaces
+@inject IFleetStateService StateService
+@implements IDisposable
 
-<div class="top-row ps-3 navbar navbar-dark bg-dark shadow-sm">
+<div class="top-row ps-3 navbar navbar-dark bg-black border-bottom border-secondary">
     <div class="container-fluid">
-        <a class="navbar-brand fw-bold text-uppercase tracking-wider" href="">
-            <span class="bi bi-truck-flatbed me-2 text-primary"></span>Fleet Command
+        <a class="navbar-brand fw-black text-uppercase tracking-tighter" href="">
+            <span class="bi bi-truck-flatbed me-2 text-primary"></span>FLEET <span class="text-primary">COMMAND</span>
         </a>
     </div>
 </div>
 
-<div class="nav-scrollable">
-    <nav class="flex-column">
-
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
-                <span class="bi bi-speedometer2" aria-hidden="true"></span> Dashboard
+<div class="nav-scrollable bg-dark">
+    <nav class="flex-column mt-3">
+        <div class="nav-item px-3 mb-2">
+            <NavLink class="nav-link rounded-1 py-2 font-monospace" href="" Match="NavLinkMatch.All">
+                <span class="bi bi-grid-1x2-fill me-2" aria-hidden="true"></span> DASHBOARD
             </NavLink>
         </div>
 
         <AuthorizeView>
             <Authorized>
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="fleet-map">
-                        <span class="bi bi-map" aria-hidden="true"></span> Live Map
+                <div class="text-muted small text-uppercase mb-2 ps-4 tracking-widest opacity-50" style="font-size: 0.6rem;">Monitoring</div>
+
+                <div class="nav-item px-3 mb-1">
+                    <NavLink class="nav-link rounded-1 py-2 font-monospace d-flex justify-content-between align-items-center" href="fleet-map">
+                        <span><span class="bi bi-geo-alt-fill me-2" aria-hidden="true"></span> LIVE_MAP</span>
+                        @if (_riskCount > 0)
+                        {
+                            <span class="badge rounded-pill bg-danger border border-light blink" style="font-size: 0.7rem; padding: 0.35em 0.65em;">@_riskCount ALERT</span>
+                        }
                     </NavLink>
                 </div>
 
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="analytics">
-                        <span class="bi bi-cpu" aria-hidden="true"></span> AI Analytics
+                <div class="nav-item px-3 mb-1">
+                    <NavLink class="nav-link rounded-1 py-2 font-monospace" href="analytics">
+                        <span class="bi bi-bar-chart-fill me-2" aria-hidden="true"></span> ANALYTICS
                     </NavLink>
                 </div>
 
-                @* PRO ADDITION: History / Audit Trail *@
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="history">
-                        <span class="bi bi-clock-history" aria-hidden="true"></span> Audit Trail
+                <div class="nav-item px-3 mb-1">
+                    <NavLink class="nav-link rounded-1 py-2 font-monospace" href="history">
+                        <span class="bi bi-cpu-fill me-2" aria-hidden="true"></span> TELEMETRY_LOGS
                     </NavLink>
                 </div>
 
-                <div class="nav-item px-3 mt-5 border-top border-secondary pt-3">
-                    <div class="nav-link text-muted small mb-2">
-                        <i class="bi bi-person-circle me-2"></i>@context.User.Identity?.Name
-                    </div>
-                    <NavLink class="nav-link text-danger logout-link" href="logout">
-                        <span class="bi bi-box-arrow-right" aria-hidden="true"></span> Logout Session
-                    </NavLink>
+                <div class="nav-item px-3 mt-4 border-top border-secondary-subtle pt-3">
+                    <div class="text-muted small text-uppercase mb-2 ps-2 tracking-widest opacity-50" style="font-size: 0.6rem;">Session Control</div>
+                    <form action="logout" method="post">
+                        <AntiforgeryToken />
+                        <button type="submit" class="nav-link btn btn-link text-danger w-100 text-start border-0 shadow-none hover-danger font-monospace py-2">
+                            <span class="bi bi-power me-2" aria-hidden="true"></span> TERMINATE_LINK
+                        </button>
+                    </form>
                 </div>
             </Authorized>
-
             <NotAuthorized>
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="login">
-                        <span class="bi bi-shield-lock" aria-hidden="true"></span> Authenticate
+                <div class="nav-item px-3 mt-3">
+                    <NavLink class="nav-link text-primary border border-primary-subtle rounded-1 text-center font-monospace" href="login">
+                        AUTHENTICATE
                     </NavLink>
                 </div>
             </NotAuthorized>
         </AuthorizeView>
-
     </nav>
 </div>
 
-<style>
-    .tracking-wider {
-        letter-spacing: 0.1rem;
+@code {
+    private int _riskCount = 0;
+    private Timer? _refreshTimer;
+
+    protected override void OnInitialized()
+    {
+        // Poll the StateService for overspeeding trucks every 2 seconds
+        _refreshTimer = new Timer(_ =>
+        {
+            InvokeAsync(() =>
+            {
+                var currentFleet = StateService.GetFormattedFleet();
+                _riskCount = currentFleet?.Count(t => t.Speed > 85) ?? 0;
+                StateHasChanged();
+            });
+        }, null, 0, 2000);
     }
 
-    .logout-link:hover {
-        background-color: rgba(220, 53, 69, 0.1);
-    }
-</style>
+    public void Dispose() => _refreshTimer?.Dispose();
+}

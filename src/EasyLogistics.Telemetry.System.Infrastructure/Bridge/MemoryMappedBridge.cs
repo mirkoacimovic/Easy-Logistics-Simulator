@@ -1,83 +1,107 @@
-﻿using System.IO.MemoryMappedFiles;
-using System.Runtime.InteropServices;
-using System.Runtime.Versioning;
-using EasyLogistics.Telemetry.System.Core.Configuration; // <-- MUST MATCH FILE ABOVE
+﻿using EasyLogistics.Telemetry.System.Core.Configuration;
 using EasyLogistics.Telemetry.System.Core.Interfaces;
 using EasyLogistics.Telemetry.System.Core.Models;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Microsoft.Win32.SafeHandles;
+using System.Runtime.InteropServices;
 
 namespace EasyLogistics.Telemetry.System.Infrastructure.Bridge;
 
-[SupportedOSPlatform("windows")]
+/// <summary>
+/// Infrastructure bridge that reads telemetry data from a shared binary file.
+/// Uses RandomAccess for high-performance, exact-length reads from Docker volumes.
+/// </summary>
 public sealed class MemoryMappedBridge : IFleetBridge, IDisposable
 {
     private readonly FleetSettings _settings;
-    private readonly int _bufferSize;
     private readonly ILogger<MemoryMappedBridge> _logger;
-    private MemoryMappedFile? _mmf;
+    private readonly string _bridgePath;
+    private readonly int _structSize;
 
     public MemoryMappedBridge(ILogger<MemoryMappedBridge> logger, IOptions<FleetSettings> settings)
     {
         _logger = logger;
         _settings = settings.Value;
-
-        // Use settings to calculate buffer
-        _bufferSize = Marshal.SizeOf<TruckTelemetry>() * _settings.MaxTrucks;
-
-        InitializeBridge();
+        _bridgePath = _settings.SharedMemoryPath ?? "/app/data/TruckTelemetryBridge.bin";
+        _structSize = Marshal.SizeOf<TruckTelemetry>();
     }
 
-    private void InitializeBridge()
-    {
-        try
-        {
-            _mmf = MemoryMappedFile.CreateOrOpen(_settings.ShmName, _bufferSize, MemoryMappedFileAccess.ReadWrite);
-            _logger.LogInformation("MMF Bridge Initialized: {Name}", _settings.ShmName);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogCritical(ex, "Failed to initialize MMF.");
-        }
-    }
-
+    /// <summary>
+    /// Reads the current state of the fleet from the binary bridge file.
+    /// Handles IO contention with the Python engine via FileShare and IOException catches.
+    /// </summary>
     public TruckTelemetry[] ReadFleet()
     {
-        if (_mmf == null) return Array.Empty<TruckTelemetry>();
+        if (!File.Exists(_bridgePath))
+        {
+            return Array.Empty<TruckTelemetry>();
+        }
 
-        var fleet = new TruckTelemetry[_settings.MaxTrucks];
         try
         {
-            using var accessor = _mmf.CreateViewAccessor(0, _bufferSize, MemoryMappedFileAccess.Read);
-            if (accessor.ReadByte(0) == 0) return Array.Empty<TruckTelemetry>();
+            using SafeFileHandle handle = File.OpenHandle(
+                _bridgePath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite);
 
-            accessor.ReadArray(0, fleet, 0, _settings.MaxTrucks);
+            long fileLength = RandomAccess.GetLength(handle);
+            if (fileLength == 0 || fileLength < _structSize)
+            {
+                return Array.Empty<TruckTelemetry>();
+            }
+
+            byte[] buffer = new byte[fileLength];
+
+            int bytesRead = RandomAccess.Read(handle, buffer, 0);
+
+            if (bytesRead < _structSize)
+            {
+                return Array.Empty<TruckTelemetry>();
+            }
+
+            int truckCount = bytesRead / _structSize;
+            var fleet = new TruckTelemetry[truckCount];
+
+            for (int i = 0; i < truckCount; i++)
+            {
+                byte[] structBuffer = new byte[_structSize];
+                Buffer.BlockCopy(buffer, i * _structSize, structBuffer, 0, _structSize);
+
+                GCHandle gcHandle = GCHandle.Alloc(structBuffer, GCHandleType.Pinned);
+                
+                try
+                {
+                    fleet[i] = Marshal.PtrToStructure<TruckTelemetry>(gcHandle.AddrOfPinnedObject());
+                }
+                finally
+                {
+                    gcHandle.Free();
+                }
+            }
+
+            // Return only valid trucks (filter out empty binary slots)
             return fleet.Where(t => t.TruckId > 0).ToArray();
+        }
+        catch (IOException)
+        {
+            return Array.Empty<TruckTelemetry>();
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "MMF Read Failed");
+            _logger.LogError(ex, "Telemetry Bridge Read Failure on path: {Path}", _bridgePath);
             return Array.Empty<TruckTelemetry>();
         }
     }
 
     public void WriteFleet(TruckTelemetry[] fleet)
     {
-        if (_mmf == null || fleet == null) return;
-        try
-        {
-            using var accessor = _mmf.CreateViewAccessor(0, _bufferSize, MemoryMappedFileAccess.Write);
-            accessor.WriteArray(0, fleet, 0, Math.Min(fleet.Length, _settings.MaxTrucks));
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "MMF Write Failed");
-        }
+        // One-way bridge: Python produces, .NET consumes.
     }
 
     public void Dispose()
     {
-        _mmf?.Dispose();
-        GC.SuppressFinalize(this);
+        // File handles are managed by 'using' blocks; no persistent resources to release.
     }
 }

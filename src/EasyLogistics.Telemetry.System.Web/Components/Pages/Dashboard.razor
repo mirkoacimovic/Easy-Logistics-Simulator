@@ -1,186 +1,290 @@
-﻿@page "/"
+﻿@* @page "/"
 @using EasyLogistics.Telemetry.System.Core.Models
 @using EasyLogistics.Telemetry.System.Core.Interfaces
-@using EasyLogistics.Telemetry.System.Web.Services
-@using Microsoft.AspNetCore.Components.Authorization
-@inject SignalRClientService SignalR
+@using Microsoft.AspNetCore.SignalR.Client
+@inject NavigationManager Nav
 @inject IFleetStateService StateService
-@implements IDisposable
-@rendermode @(new InteractiveServerRenderMode(prerender: false))
-@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@implements IAsyncDisposable
+@rendermode InteractiveServer
 
-<PageTitle>Command Center | Fleet Engine</PageTitle>
-
-<style>
-    @((MarkupString)_componentStyles)
-</style>
-
-<div class="container-fluid bg-black min-vh-100 p-4">
-    @* --- TOP METRICS --- *@
-    <div class="row g-3 mb-4">
-        <div class="col-md-3">
-            <div class="kpi-card p-4 shadow-sm text-center">
-                <div class="small text-muted mb-1 text-uppercase fw-bold">Active Units</div>
-                <div class="h1 text-white mb-0 fw-bold text-mono">@GetActiveCount()</div>
-            </div>
-        </div>
-        <div class="col-md-3">
-            <div class="kpi-card p-4 shadow-sm text-center">
-                <div class="small text-muted mb-1 text-uppercase fw-bold">Total Fuel</div>
-                <div class="h1 text-danger mb-0 fw-bold text-mono">@GetTotalFuel() <span class="fs-4">L</span></div>
-            </div>
-        </div>
-        <div class="col-md-3">
-            <div class="kpi-card p-4 shadow-sm text-center">
-                <div class="small text-muted mb-1 text-uppercase fw-bold">Avg Velocity</div>
-                <div class="h1 text-primary mb-0 fw-bold text-mono">@GetAvgSpeed() <span class="fs-4">km/h</span></div>
-            </div>
-        </div>
-        <div class="col-md-3">
-            <div class="kpi-card p-4 shadow-sm text-center">
-                <div class="small text-muted mb-1 text-uppercase fw-bold">Sync Health</div>
-                <div class="h1 text-success mb-0 fw-bold text-mono">100<span class="fs-4">%</span></div>
-            </div>
-        </div>
+<div class="dashboard-header d-flex justify-content-between align-items-end mb-4 border-bottom border-secondary pb-3">
+    <div>
+        <h2 class="text-white fw-bold mb-0 tracking-tighter">FLEET <span class="text-primary">OPS</span></h2>
+        <span class="badge bg-primary-subtle text-primary border border-primary px-3">NETWORK LIVE</span>
     </div>
-
-    @* --- FILTERS --- *@
-    <div class="d-flex justify-content-between align-items-center mb-3">
-        <div class="d-flex gap-3 align-items-center">
-            <h4 class="text-white fw-bold mb-0">TELEMETRY FEED</h4>
-            <input type="text" @bind="_searchQuery" @bind:event="oninput"
-                   placeholder="Search ID or City..." class="search-input" style="width: 250px;" />
-
-            <select @bind="_statusFilter" class="search-input">
-                <option value="All">All Statuses</option>
-                <option value="Moving">Moving</option>
-                <option value="Idle">Idle</option>
-            </select>
+    <div class="text-end">
+        <div class="small text-muted text-uppercase fw-bold">System Status</div>
+        <div class="d-flex align-items-center gap-2">
+            <div class="pulse-dot @(isConnected ? "bg-success" : "bg-danger")"></div>
+            <span class="text-white font-monospace small">@(isConnected ? "ENCRYPTED_LINK" : "SIGNAL_LOSS")</span>
         </div>
-        <div class="text-end">
-            <span class="live-dot"></span>
-            <span class="text-success small fw-bold ms-2">ENGINE ACTIVE</span>
-        </div>
-    </div>
-
-    @* --- DATA TABLE --- *@
-    <div class="table-responsive table-dark-custom">
-        <table class="table table-dark table-hover align-middle mb-0">
-            <thead class="small text-uppercase" style="background: #000;">
-                <tr>
-                    <th class="ps-4 py-3">Asset</th>
-                    <th>Current Route</th>
-                    <th>Status</th>
-                    <th>Position</th>
-                    <th>Velocity</th>
-                    <th>Consumption</th>
-                    <th class="pe-4 text-end">Last Sync</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var truck in GetFilteredFleet())
-                {
-                    <tr style="border-bottom: 1px solid #1f1f1f;">
-                        <td class="ps-4">
-                            <span class="text-primary fw-bold">TRK-@truck.TruckId.ToString("D3")</span>
-                        </td>
-                        <td>
-                            <span class="text-white-50"><i class="bi bi-geo-alt me-1 text-info"></i>@truck.RouteName</span>
-                        </td>
-                        <td>
-                            <span class="badge @(truck.Speed > 5 ? "bg-success" : "bg-secondary")">
-                                @(truck.Speed > 5 ? "MOVING" : "IDLE")
-                            </span>
-                        </td>
-                        <td class="text-mono small text-info">
-                            @truck.Latitude.ToString("F3"), @truck.Longitude.ToString("F3")
-                        </td>
-                        <td>
-                            <span class="fw-bold fs-5">@truck.Speed.ToString("F1")</span> <span class="text-muted small">km/h</span>
-                        </td>
-                        <td class="text-danger fw-bold">@truck.FuelConsumed.ToString("F1") L</td>
-                        <td class="pe-4 text-end text-muted text-mono small">
-                            @((DateTime.Now - truck.LastUpdated).TotalSeconds.ToString("F1"))s
-                        </td>
-                    </tr>
-                }
-            </tbody>
-        </table>
     </div>
 </div>
 
+<div class="row g-3">
+    @if (_trucks != null && _trucks.Any())
+    {
+        @foreach (var truck in _trucks)
+        {
+            <div class="col-xl-3 col-lg-4 col-md-6">
+                <div class="card bg-black border-secondary telemetry-card shadow-sm">
+                    <div class="card-header border-secondary d-flex justify-content-between align-items-center py-2">
+                        <span class="text-primary font-monospace fw-bold small">ID // @truck.TruckId.ToString("D3")</span>
+                        <span class="badge @(truck.Speed > 0 ? "bg-success" : "bg-warning") text-black fw-bold" style="font-size: 0.65rem;">
+                            @(truck.Speed > 0 ? "MOVING" : "STATIONARY")
+                        </span>
+                    </div>
+                    <div class="card-body py-3">
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <span class="text-muted small fw-bold">VELOCITY</span>
+                            <span class="text-white h4 mb-0 font-monospace">@truck.Speed.ToString("F1")</span>
+                        </div>
+                        <div class="progress bg-dark mb-3" style="height: 4px;">
+                            <div class="progress-bar bg-primary shadow-glow" style="width: @(Math.Min(truck.Speed, 100))%"></div>
+                        </div>
+                        <div class="row g-2 text-center">
+                            <div class="col-6">
+                                <div class="bg-dark rounded py-2 border border-secondary-subtle">
+                                    <div class="text-muted small-xs fw-bold">FUEL</div>
+                                    <div class="text-white small">@truck.FuelConsumed.ToString("F1") L</div>
+                                </div>
+                            </div>
+                            <div class="col-6">
+                                <div class="bg-dark rounded py-2 border border-secondary-subtle">
+                                    <div class="text-muted small-xs fw-bold">ODO</div>
+                                    <div class="text-white small">@truck.DistanceTraveled.ToString("F0") KM</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-footer border-secondary py-1 bg-transparent">
+                        <code class="text-muted small-xs">POS: @truck.Latitude.ToString("F4") | @truck.Longitude.ToString("F4")</code>
+                    </div>
+                </div>
+            </div>
+        }
+    }
+</div>
+
+<style>
+    .telemetry-card {
+        transition: transform 0.2s ease;
+        cursor: default;
+    }
+
+        .telemetry-card:hover {
+            transform: translateY(-3px);
+            border-color: var(--bs-primary) !important;
+        }
+
+    .small-xs {
+        font-size: 0.7rem;
+    }
+
+    .pulse-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+    }
+
+    .bg-success {
+        box-shadow: 0 0 10px #198754;
+    }
+
+    .shadow-glow {
+        box-shadow: 0 0 8px var(--bs-primary);
+    }
+</style>
+
 @code {
-    private IEnumerable<TruckDisplayVm> _fleet = new List<TruckDisplayVm>();
-    private string _searchQuery = "";
-    private string _statusFilter = "All";
+    private HubConnection? _hubConnection;
+    private List<TruckDisplayVm> _trucks = new();
+    private bool isConnected => _hubConnection?.State == HubConnectionState.Connected;
 
-    [CascadingParameter] private Task<AuthenticationState>? AuthStateTask { get; set; }
-
-    private const string _componentStyles = @"
-        @keyframes status-pulse {
-            0% { opacity: 1; transform: scale(1); }
-            50% { opacity: 0.4; transform: scale(1.2); }
-            100% { opacity: 1; transform: scale(1); }
-        }
-        .live-dot {
-            width: 10px; height: 10px; background-color: #28a745; border-radius: 50%;
-            display: inline-block; animation: status-pulse 2s infinite;
-        }
-        .kpi-card { background: #161616; border-top: 2px solid #333; transition: all 0.3s ease; border-radius: 8px; }
-        .kpi-card:hover { border-top-color: #0d6efd; background: #1c1c1c; }
-        .table-dark-custom { background: #161616; border: 1px solid #222; border-radius: 8px; overflow: hidden; }
-        .search-input { background: #000; border: 1px solid #333; color: white; border-radius: 4px; padding: 6px 12px; }
-        .text-mono { font-family: ui-monospace, 'Cascadia Code', monospace; }
-        .table-dark { --bs-table-bg: transparent !important; }
-    ";
-
-    protected override void OnInitialized() => _fleet = StateService.GetFormattedFleet();
-
-    protected override async Task OnAfterRenderAsync(bool firstRender)
+    protected override async Task OnInitializedAsync()
     {
-        if (firstRender && AuthStateTask != null)
+        // 1. Load data immediately from the Singleton (Prevents spinner on nav)
+        _trucks = StateService.GetFormattedFleet();
+
+        // 2. Build SignalR Connection
+        _hubConnection = new HubConnectionBuilder()
+            .WithUrl(Nav.ToAbsoluteUri("/fleethub"))
+            .WithAutomaticReconnect(new[] { TimeSpan.Zero, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(5) })
+            .Build();
+
+        // 3. Listen for live updates
+        _hubConnection.On<List<TruckDisplayVm>>("ReceiveFleetUpdate", (data) =>
         {
-            var authState = await AuthStateTask;
-            if (authState.User.Identity?.IsAuthenticated == true)
-            {
-                try
-                {
-                    await SignalR.StartAsync();
-                    SignalR.OnFleetReceived += HandleUpdate;
-                }
-                catch { }
-            }
-        }
+            _trucks = data;
+            InvokeAsync(StateHasChanged);
+        });
+
+        await _hubConnection.StartAsync();
     }
 
-    private void HandleUpdate(IEnumerable<TruckDisplayVm> updatedFleet)
+    public async ValueTask DisposeAsync()
     {
-        _fleet = updatedFleet;
-        InvokeAsync(StateHasChanged);
-    }
-
-    private IEnumerable<TruckDisplayVm> GetFilteredFleet()
-    {
-        var result = _fleet;
-
-        if (!string.IsNullOrWhiteSpace(_searchQuery))
+        if (_hubConnection is not null) 
         {
-            result = result.Where(x =>
-                x.TruckId.ToString().Contains(_searchQuery) ||
-                $"TRK-{x.TruckId:D3}".Contains(_searchQuery, StringComparison.OrdinalIgnoreCase) ||
-                x.RouteName.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase) // Added Route Search
-            );
+            await _hubConnection.DisposeAsync();
         }
+    }
+} *@
 
-        if (_statusFilter == "Moving") result = result.Where(x => x.Speed > 5);
-        if (_statusFilter == "Idle") result = result.Where(x => x.Speed <= 5);
+@page "/"
+@using EasyLogistics.Telemetry.System.Core.Models
+@using EasyLogistics.Telemetry.System.Core.Interfaces
+@using Microsoft.AspNetCore.SignalR.Client
+@inject NavigationManager Nav
+@inject IFleetStateService StateService
+@implements IAsyncDisposable
+@rendermode InteractiveServer
 
-        return result.OrderByDescending(x => x.Speed);
+@{
+    // We define the keyframes as a string to hide the @ symbols from the CSS validator
+    var keyframes = @"
+        @keyframes pulse-animation {
+            0% { opacity: 1; }
+            50% { opacity: 0.4; }
+            100% { opacity: 1; }
+        }";
+}
+
+<div class="dashboard-header d-flex justify-content-between align-items-end mb-4 border-bottom border-secondary pb-3">
+    <div>
+        <h2 class="text-white fw-bold mb-0 tracking-tighter">FLEET <span class="text-primary">OPS</span></h2>
+        <span class="badge bg-primary-subtle text-primary border border-primary px-3">NETWORK LIVE</span>
+    </div>
+    <div class="text-end">
+        <div class="small text-muted text-uppercase fw-bold">System Status</div>
+        <div class="d-flex align-items-center gap-2">
+            <div class="pulse-dot @(isConnected ? "bg-success" : "bg-danger")"></div>
+            <span class="text-white font-monospace small">@(isConnected ? "ENCRYPTED_LINK" : "SIGNAL_LOSS")</span>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3">
+    @if (_trucks != null && _trucks.Any())
+    {
+        @foreach (var truck in _trucks)
+        {
+            <div class="col-xl-3 col-lg-4 col-md-6">
+                <div class="card bg-black border-secondary telemetry-card shadow-sm">
+                    <div class="card-header border-secondary d-flex justify-content-between align-items-center py-2">
+                        <span class="text-primary font-monospace fw-bold small">ID // @truck.TruckId.ToString("D3")</span>
+                        <span class="badge @(truck.Speed > 0 ? "bg-success" : "bg-warning") text-black fw-bold" style="font-size: 0.65rem;">
+                            @(truck.Speed > 0 ? "MOVING" : "STATIONARY")
+                        </span>
+                    </div>
+                    <div class="card-body py-3">
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <span class="text-muted small fw-bold">VELOCITY</span>
+                            <span class="text-white h4 mb-0 font-monospace">@truck.Speed.ToString("F1") <small class="text-muted" style="font-size: 0.6rem;">KM/H</small></span>
+                        </div>
+                        <div class="progress bg-dark mb-3" style="height: 4px;">
+                            <div class="progress-bar bg-primary shadow-glow" style="width: @(Math.Min(truck.Speed, 100))%"></div>
+                        </div>
+                        <div class="row g-2 text-center">
+                            <div class="col-6">
+                                <div class="bg-dark rounded py-2 border border-secondary-subtle">
+                                    <div class="text-muted small-xs fw-bold">FUEL</div>
+                                    <div class="text-white small">@truck.FuelConsumed.ToString("F1") L</div>
+                                </div>
+                            </div>
+                            <div class="col-6">
+                                <div class="bg-dark rounded py-2 border border-secondary-subtle">
+                                    <div class="text-muted small-xs fw-bold">ODO</div>
+                                    <div class="text-white small">@truck.DistanceTraveled.ToString("F0") KM</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-footer border-secondary py-1 bg-transparent">
+                        <code class="text-muted small-xs">POS: @truck.Latitude.ToString("F4") | @truck.Longitude.ToString("F4")</code>
+                    </div>
+                </div>
+            </div>
+        }
+    }
+    else
+    {
+        <div class="col-12 text-center py-5">
+            <div class="spinner-border text-primary" role="status"></div>
+            <div class="text-muted mt-3 font-monospace">SCANNING_SHM_RESERVES...</div>
+        </div>
+    }
+</div>
+
+<style>
+    .telemetry-card {
+        transition: transform 0.2s ease, border-color 0.2s ease;
+        cursor: default;
     }
 
-    private int GetActiveCount() => _fleet?.Count(x => x.Speed > 5) ?? 0;
-    private string GetTotalFuel() => _fleet?.Sum(x => x.FuelConsumed).ToString("N1") ?? "0.0";
-    private string GetAvgSpeed() => _fleet?.Any() == true ? _fleet.Average(x => x.Speed).ToString("F1") : "0.0";
+        .telemetry-card:hover {
+            transform: translateY(-3px);
+            border-color: var(--bs-primary) !important;
+        }
 
-    public void Dispose() => SignalR.OnFleetReceived -= HandleUpdate;
+    .small-xs {
+        font-size: 0.7rem;
+    }
+
+    .pulse-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        animation: pulse-animation 2s infinite;
+    }
+
+    /* Injecting the keyframes string here as raw HTML */
+    @((MarkupString)keyframes)
+
+    .bg-success {
+        box-shadow: 0 0 10px #198754;
+    }
+
+    .shadow-glow {
+        box-shadow: 0 0 8px var(--bs-primary);
+    }
+</style>
+
+@code {
+    private HubConnection? _hubConnection;
+    private List<TruckDisplayVm> _trucks = new();
+    private bool isConnected => _hubConnection?.State == HubConnectionState.Connected;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _trucks = StateService.GetFormattedFleet() ?? new();
+
+        _hubConnection = new HubConnectionBuilder()
+            .WithUrl(Nav.ToAbsoluteUri("/fleethub"))
+            .WithAutomaticReconnect()
+            .Build();
+
+        _hubConnection.On<List<TruckDisplayVm>>("ReceiveFleetUpdate", (data) =>
+        {
+            _trucks = data;
+            InvokeAsync(StateHasChanged);
+        });
+
+        try
+        {
+            await _hubConnection.StartAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"SignalR Error: {ex.Message}");
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_hubConnection is not null)
+        {
+            await _hubConnection.DisposeAsync();
+        }
+    }
 }

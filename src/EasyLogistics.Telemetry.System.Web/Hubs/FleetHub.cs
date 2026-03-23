@@ -1,56 +1,25 @@
-﻿using Microsoft.AspNetCore.SignalR;
-using Microsoft.AspNetCore.Authorization;
+﻿using EasyLogistics.Telemetry.System.Core.Interfaces;
+using Microsoft.AspNetCore.SignalR;
 
 namespace EasyLogistics.Telemetry.System.Web.Hubs;
 
-/// <summary>
-/// High-frequency SignalR hub for telemetry broadcasting.
-/// Optimized for Phase 4: Uses Group management to reduce unnecessary traffic.
-/// </summary>
-[Authorize]
 public sealed class FleetHub : Hub
 {
-    private readonly ILogger<FleetHub> _logger;
-    private const string MONITORING_GROUP = "ActiveFleetMonitoring";
+    private readonly IFleetStateService _stateService;
 
-    public FleetHub(ILogger<FleetHub> logger)
+    public FleetHub(IFleetStateService stateService)
     {
-        _logger = logger;
-    }
-
-    /// <summary>
-    /// When a user opens the Map or Analytics, they join the monitoring group.
-    /// </summary>
-    public async Task StartMonitoring()
-    {
-        await Groups.AddToGroupAsync(Context.ConnectionId, MONITORING_GROUP);
-        _logger.LogInformation("📈 User {User} started live monitoring.", Context.User?.Identity?.Name);
-    }
-
-    /// <summary>
-    /// Stops the stream for this specific client when they navigate away.
-    /// </summary>
-    public async Task StopMonitoring()
-    {
-        await Groups.RemoveFromGroupAsync(Context.ConnectionId, MONITORING_GROUP);
+        _stateService = stateService;
     }
 
     public override async Task OnConnectedAsync()
     {
-        _logger.LogInformation("🚚 Client connected: {ConnectionId} (User: {User})",
-            Context.ConnectionId,
-            Context.User?.Identity?.Name ?? "Authenticated User");
+        var currentFleet = _stateService.GetFormattedFleet();
+        if (currentFleet != null && currentFleet.Any())
+        {
+            await Clients.Caller.SendAsync("ReceiveFleetUpdate", currentFleet);
+        }
 
         await base.OnConnectedAsync();
-    }
-
-    public override async Task OnDisconnectedAsync(Exception? exception)
-    {
-        if (exception != null)
-        {
-            _logger.LogWarning("Client disconnected with error: {Id}. Reason: {Msg}",
-                Context.ConnectionId, exception.Message);
-        }
-        await base.OnDisconnectedAsync(exception);
     }
 }

@@ -1,116 +1,186 @@
-﻿@page "/fleet-map"
-@using EasyLogistics.Telemetry.System.Core.Interfaces
+﻿@* @page "/fleet-map"
+@using Microsoft.AspNetCore.SignalR.Client
 @using EasyLogistics.Telemetry.System.Core.Models
-@using Microsoft.AspNetCore.Authorization
-@attribute [Authorize]
-@inject IFleetStateService FleetService
+@using EasyLogistics.Telemetry.System.Core.Interfaces
+@inject NavigationManager Nav
 @inject IJSRuntime JS
-@implements IDisposable
+@inject IFleetStateService StateService
+@implements IAsyncDisposable
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 
-<PageTitle>Live Fleet | Phase 4</PageTitle>
-
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-
-<style>
-    .map-wrapper {
-        position: relative;
-        height: calc(100vh - 50px);
-        width: 100%;
-        background: #111;
-    }
-
-    #map {
-        position: absolute;
-        top: 0;
-        bottom: 0;
-        left: 0;
-        right: 0;
-    }
-
-    /* Optional: Glow effect for the truck icons */
-    .leaflet-marker-icon {
-        filter: drop-shadow(0px 4px 4px rgba(0,0,0,0.8));
-    }
-
-    .tracking-tighter {
-        letter-spacing: -0.05em;
-    }
-
-    /* Professional Dark HUD Tooltip */
-    .truck-tooltip {
-        background-color: rgba(0, 0, 0, 0.85) !important;
-        border: 1px solid #444 !important;
-        color: #fff !important;
-        border-radius: 4px;
-        padding: 8px;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.5);
-    }
-
-   /* Remove the little white arrow from the tooltip */
-   .truck-tooltip::before {
-       border-top-color: rgba(0, 0, 0, 0.85) !important;
-   }
-
-    .leaflet-tooltip-top:before {
-        border-top-color: transparent !important;
-    }
-</style>
-
-<div class="vh-100 d-flex flex-column bg-dark">
-    <div class="px-4 py-2 bg-black border-bottom border-secondary d-flex justify-content-between align-items-center" style="height: 50px;">
-        <h5 class="text-white mb-0 text-uppercase tracking-tighter fw-bold">
-            <span class="text-primary">●</span> Live Telemetry <span class="text-muted fw-light">| Engine Active</span>
-        </h5>
-        <div class="d-flex gap-4">
-            <div class="small text-muted">
-                Fleet Size: <span class="text-success fw-bold">@(_fleet?.Count() ?? 0)</span>
-            </div>
-            <div class="small text-muted">
-                Sync: <span class="text-info">@DateTime.Now.ToString("HH:mm:ss")</span>
-            </div>
-        </div>
-    </div>
-
-    <div class="map-wrapper">
-        <div id="map"></div>
-    </div>
-</div>
+<div id="map" style="height: 100vh; width: 100%; background: #000;"></div>
 
 @code {
-    private IEnumerable<TruckDisplayVm> _fleet = new List<TruckDisplayVm>();
-
-    protected override void OnInitialized()
-    {
-        _fleet = FleetService.GetFormattedFleet();
-        FleetService.OnFleetUpdated += HandleFleetUpdate;
-    }
+    private HubConnection? _hubConnection;
+    private string _lastSync = "WAITING";
+    private bool IsConnected => _hubConnection?.State == HubConnectionState.Connected;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
         {
-            await JS.InvokeVoidAsync("mapInterop.initialize", 44.8186, 20.4689);
-
-            if (_fleet != null && _fleet.Any())
+            try
             {
-                await JS.InvokeVoidAsync("mapInterop.updateTrucks", _fleet);
+                // 1. Initialize Map
+                await JS.InvokeVoidAsync("mapInterop.initialize", 44.8186, 20.4689);
+
+                // 2. CRITICAL: Wait for Leaflet to finalize the DOM container
+                // before trying to add markers to a map that might still be "settling"
+                await Task.Delay(500);
+
+                // 3. Hydrate with current memory state
+                var snapshot = StateService.GetFormattedFleet();
+                if (snapshot != null && snapshot.Any())
+                {
+                    await JS.InvokeVoidAsync("mapInterop.updateTrucks", snapshot);
+                    _lastSync = "RE-ENTRY_SYNC";
+                    StateHasChanged();
+                }
+
+                        _ = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                _hubConnection = new HubConnectionBuilder()
+                                    .WithUrl(Nav.ToAbsoluteUri("/fleethub"))
+                                    .WithAutomaticReconnect()
+                                    .Build();
+
+                                _hubConnection.On<List<TruckDisplayVm>>("ReceiveFleetUpdate", async (data) =>
+                                {
+                                    _lastSync = DateTime.Now.ToString("HH:mm:ss");
+                                    await JS.InvokeVoidAsync("mapInterop.updateTrucks", data);
+                                    await InvokeAsync(StateHasChanged);
+                                });
+
+                                await _hubConnection.StartAsync();
+                                Console.WriteLine("✅ Hub Connected Successfully");
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"❌ Hub Connection Failed: {ex.Message}");
+                            }
+                        });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Map Sync Error: {ex.Message}");
+            }
+        }
+    }
+    
+    
+    // protected override async Task OnAfterRenderAsync(bool firstRender)
+    // {
+    //     if (firstRender)
+    //     {
+    //         // 1. Initial JS Call (Non-blocking)
+    //         await JS.InvokeVoidAsync("mapInterop.initialize", 44.8186, 20.4689);
+
+    //         // 2. Immediate Local Load (Hydrate map without waiting for Hub)
+    //         var snapshot = StateService.GetFormattedFleet();
+    //         if (snapshot.Any())
+    //         {
+    //             await JS.InvokeVoidAsync("mapInterop.updateTrucks", snapshot);
+    //             _lastSync = "LOCAL_INIT";
+    //         }
+
+    //         // 3. Background SignalR Handshake
+    //         _ = Task.Run(async () =>
+    //         {
+    //             try
+    //             {
+    //                 _hubConnection = new HubConnectionBuilder()
+    //                     .WithUrl(Nav.ToAbsoluteUri("/fleethub"))
+    //                     .WithAutomaticReconnect()
+    //                     .Build();
+
+    //                 _hubConnection.On<List<TruckDisplayVm>>("ReceiveFleetUpdate", async (data) =>
+    //                 {
+    //                     _lastSync = DateTime.Now.ToString("HH:mm:ss");
+    //                     await JS.InvokeVoidAsync("mapInterop.updateTrucks", data);
+    //                     await InvokeAsync(StateHasChanged);
+    //                 });
+
+    //                 await _hubConnection.StartAsync();
+    //                 Console.WriteLine("✅ Hub Connected Successfully");
+    //             }
+    //             catch (Exception ex)
+    //             {
+    //                 Console.WriteLine($"❌ Hub Connection Failed: {ex.Message}");
+    //             }
+    //         });
+    //     }
+    // }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_hubConnection != null) await _hubConnection.DisposeAsync();
+    }
+} *@
+
+@page "/fleet-map"
+@using Microsoft.AspNetCore.SignalR.Client
+@using EasyLogistics.Telemetry.System.Core.Models
+@using EasyLogistics.Telemetry.System.Core.Interfaces
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@inject IFleetStateService StateService
+@implements IAsyncDisposable
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+
+<div id="map" style="height: 100vh; width: 100%; background: #000;"></div>
+
+@code {
+    private HubConnection? _hubConnection;
+    private string _lastSync = "WAITING";
+    private bool IsConnected => _hubConnection?.State == HubConnectionState.Connected;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            try
+            {
+                // 1. Initialize Leaflet (Center on Belgrade)
+                await JS.InvokeVoidAsync("mapInterop.initialize", 44.8186, 20.4689);
+
+                // 2. Immediate Hydration from Memory
+                var snapshot = StateService.GetFormattedFleet();
+                if (snapshot != null && snapshot.Any())
+                {
+                    await JS.InvokeVoidAsync("mapInterop.updateTrucks", snapshot);
+                    _lastSync = "INIT_SYNC";
+                }
+
+                // 3. Connect to the Real-time Pipe
+                _hubConnection = new HubConnectionBuilder()
+                    .WithUrl(Nav.ToAbsoluteUri("/fleethub"))
+                    .WithAutomaticReconnect()
+                    .Build();
+
+                _hubConnection.On<List<TruckDisplayVm>>("ReceiveFleetUpdate", async (data) =>
+                {
+                    _lastSync = DateTime.Now.ToString("HH:mm:ss");
+                    // Push the list directly to the Leaflet marker manager
+                    await JS.InvokeVoidAsync("mapInterop.updateTrucks", data);
+                    await InvokeAsync(StateHasChanged);
+                });
+
+                await _hubConnection.StartAsync();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Map Component Error]: {ex.Message}");
             }
         }
     }
 
-    private async void HandleFleetUpdate(List<TruckDisplayVm> newData)
+    public async ValueTask DisposeAsync()
     {
-        await InvokeAsync(async () =>
+        if (_hubConnection != null) 
         {
-            _fleet = newData;
-            try { await JS.InvokeVoidAsync("mapInterop.updateTrucks", _fleet); } catch { }
-            StateHasChanged();
-        });
-    }
-
-    public void Dispose()
-    {
-        FleetService.OnFleetUpdated -= HandleFleetUpdate;
+            await _hubConnection.DisposeAsync();
+        }
     }
 }

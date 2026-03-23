@@ -1,151 +1,129 @@
 ﻿@page "/analytics"
-@using EasyLogistics.Telemetry.System.Core.Interfaces
 @using EasyLogistics.Telemetry.System.Core.Models
+@using EasyLogistics.Telemetry.System.Core.Interfaces
 @using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.SignalR.Client
 @attribute [Authorize]
-@inject IFleetStateService FleetService
+@inject NavigationManager Navigation
 @inject IJSRuntime JS
-@implements IDisposable
+@inject IFleetStateService StateService
+@implements IAsyncDisposable
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 
-<PageTitle>Fleet Analytics | Control Center</PageTitle>
-
-<div class="container-fluid py-4">
-    <div class="row mb-4">
-        <div class="col-12 d-flex justify-content-between align-items-center">
-            <h2 class="fw-bold m-0 text-uppercase tracking-tight">
-                <i class="bi bi-bar-chart-line text-primary me-2"></i>Fuel Efficiency Monitor
-            </h2>
-            <div class="badge bg-dark border border-secondary px-3 py-2">
-                <span class="spinner-grow spinner-grow-sm text-success me-1" role="status"></span>
-                <span class="small fw-bold">TELEMETRY ACTIVE</span>
-            </div>
+<div class="container-fluid py-4 bg-black min-vh-100 text-white font-monospace">
+    <div class="d-flex justify-content-between align-items-end mb-4 border-bottom border-secondary pb-3">
+        <div>
+            <h2 class="fw-black text-uppercase tracking-tighter m-0">FUEL_<span class="text-danger">ANALYTICS</span></h2>
+            <small class="text-muted">OPERATIONAL EFFICIENCY REPORT</small>
+        </div>
+        <div class="text-end">
+            <div class="small text-muted mb-1">DATA_BRIDGE</div>
+            <span class="badge @(IsConnected ? "bg-danger" : "bg-dark") border border-danger">@(IsConnected ? "STREAMING" : "OFFLINE")</span>
         </div>
     </div>
 
-    <div class="row g-3 mb-4">
-        <div class="col-md-4">
-            <div class="card border-0 shadow-sm bg-primary text-white">
+    <div class="row g-4">
+        <div class="col-lg-9">
+            <div class="card bg-black border-secondary h-100 shadow-sm">
+                <div class="card-header border-secondary d-flex justify-content-between">
+                    <span class="text-muted small fw-bold uppercase">Consumption_By_Unit</span>
+                    <span class="text-danger small">LIVE_CANVAS</span>
+                </div>
                 <div class="card-body">
-                    <h6 class="text-uppercase opacity-75 small">Total Fleet Distance</h6>
-                    <h3 class="mb-0 fw-bold">@_latestFleet.Sum(t => t.DistanceTraveled).ToString("N1") <small class="fs-6">km</small></h3>
+                    <div style="height: 450px; position: relative;">
+                        <canvas id="fuelChart"></canvas>
+                    </div>
                 </div>
             </div>
         </div>
-        <div class="col-md-4">
-            <div class="card border-0 shadow-sm">
-                <div class="card-body">
-                    <h6 class="text-uppercase text-muted small">Total Fuel Burned</h6>
-                    <h3 class="mb-0 fw-bold text-danger">@_latestFleet.Sum(t => t.FuelConsumed).ToString("F2") <small class="fs-6 text-muted">L</small></h3>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-4">
-            <div class="card border-0 shadow-sm">
-                <div class="card-body">
-                    <h6 class="text-uppercase text-muted small">Active/Total Trucks</h6>
-                    <h3 class="mb-0 fw-bold">@_latestFleet.Count(t => t.Speed > 0) / @_latestFleet.Count</h3>
-                </div>
-            </div>
-        </div>
-    </div>
 
-    <div class="row mb-4">
-        <div class="col-12">
-            <div class="card border-0 shadow-sm p-4">
-                <h5 class="fw-bold mb-3 text-secondary">Individual Truck Fuel Consumption (L)</h5>
-                <div style="height: 350px;">
-                    <canvas id="fuelChart"></canvas>
+        <div class="col-lg-3">
+            <div class="card bg-black border-danger mb-4">
+                <div class="card-body">
+                    <label class="text-muted small d-block">FLEET_CONSUMPTION</label>
+                    <span class="h2 text-danger fw-bold">@_latestFleet.Sum(t => t.FuelConsumed).ToString("F1")</span>
+                    <small class="text-muted">L</small>
                 </div>
             </div>
-        </div>
-    </div>
 
-    <div class="card border-0 shadow-sm border">
-        <div class="table-responsive">
-            <table class="table align-middle mb-0 table-hover">
-                <thead class="table-light text-uppercase small fw-bold">
-                    <tr>
-                        <th class="ps-4">Truck</th>
-                        <th>Status</th>
-                        <th>Speed</th>
-                        <th>Fuel Used</th>
-                        <th class="text-end pe-4">Current Cost</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach (var truck in _latestFleet)
+            <div class="card bg-black border-secondary">
+                <div class="card-header border-secondary py-2">
+                    <span class="text-muted small fw-bold">TOP_CONSUMERS</span>
+                </div>
+                <div class="list-group list-group-flush">
+                    @foreach (var truck in _latestFleet.OrderByDescending(t => t.FuelConsumed).Take(8))
                     {
-                        <tr>
-                            <td class="ps-4"><strong>#@truck.TruckId</strong></td>
-                            <td>
-                                <span class="badge @(truck.Status == "Moving" ? "bg-success" : "bg-secondary")">@truck.Status</span>
-                            </td>
-                            <td>@truck.Speed.ToString("F1") <small class="text-muted">km/h</small></td>
-                            <td class="text-danger fw-bold">@truck.FuelConsumed.ToString("F2") L</td>
-                            <td class="text-end pe-4 fw-bold">€@truck.TotalCost.ToString("F2")</td>
-                        </tr>
+                        <div class="list-group-item bg-transparent text-white border-secondary border-opacity-25 py-2">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <span class="small">#@truck.TruckId.ToString("D3")</span>
+                                <span class="text-danger fw-bold small">@truck.FuelConsumed.ToString("F1") L</span>
+                            </div>
+                            <div class="progress mt-1" style="height: 2px; background: #111;">
+                                <div class="progress-bar bg-danger" style="width: @(GetFuelPercentage(truck.FuelConsumed))%"></div>
+                            </div>
+                        </div>
                     }
-                </tbody>
-            </table>
+                </div>
+            </div>
         </div>
     </div>
 </div>
 
 @code {
     private List<TruckDisplayVm> _latestFleet = new();
+    private HubConnection? _hubConnection;
     private bool _chartReady = false;
-
-    protected override void OnInitialized()
-    {
-        _latestFleet = FleetService.GetFormattedFleet();
-        FleetService.OnFleetUpdated += HandleFleetUpdate;
-    }
+    private bool IsConnected => _hubConnection?.State == HubConnectionState.Connected;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
         {
-            // Allow JS library to settle
-            await Task.Delay(500);
+            // Initial snapshot from the Singleton Service
+            _latestFleet = StateService.GetFormattedFleet();
+            if (_latestFleet.Any()) await UpdateChart();
 
-            if (_latestFleet.Any())
+            _hubConnection = new HubConnectionBuilder()
+                .WithUrl(Navigation.ToAbsoluteUri("/fleethub"))
+                .WithAutomaticReconnect()
+                .Build();
+
+            _hubConnection.On<List<TruckDisplayVm>>("ReceiveFleetUpdate", async (data) =>
             {
-                var labels = _latestFleet.Select(t => $"Truck #{t.TruckId}").ToArray();
-                var values = _latestFleet.Select(t => t.FuelConsumed).ToArray();
+                _latestFleet = data;
+                await UpdateChart();
+                await InvokeAsync(StateHasChanged);
+            });
 
-                try
-                {
-                    await JS.InvokeVoidAsync("initChart", labels, values);
-                    _chartReady = true;
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Chart Initialization Error: {ex.Message}");
-                }
-            }
+            await _hubConnection.StartAsync();
         }
     }
 
-    private async void HandleFleetUpdate(List<TruckDisplayVm> newData)
+    private async Task UpdateChart()
     {
-        await InvokeAsync(async () =>
+        try
         {
-            _latestFleet = newData;
+            var labels = _latestFleet.Select(t => $"U-{t.TruckId:D3}").ToArray();
+            var values = _latestFleet.Select(t => t.FuelConsumed).ToArray();
 
-            if (_chartReady)
+            if (!_chartReady)
             {
-                var labels = newData.Select(t => $"# {t.TruckId}").ToArray();
-                var values = newData.Select(t => t.FuelConsumed).ToArray();
+                await JS.InvokeVoidAsync("initChart", labels, values);
+                _chartReady = true;
+            }
+            else
+            {
                 await JS.InvokeVoidAsync("updateChart", labels, values);
             }
-
-            StateHasChanged();
-        });
+        }
+        catch (Exception ex) { Console.WriteLine($"Analytics Fail: {ex.Message}"); }
     }
 
-    public void Dispose()
+    private double GetFuelPercentage(double current)
     {
-        FleetService.OnFleetUpdated -= HandleFleetUpdate;
+        var max = _latestFleet.Any() ? _latestFleet.Max(x => x.FuelConsumed) : 100;
+        return (current / (max > 0 ? max : 1)) * 100;
     }
+
+    public async ValueTask DisposeAsync() => await (_hubConnection?.DisposeAsync() ?? ValueTask.CompletedTask);
 }

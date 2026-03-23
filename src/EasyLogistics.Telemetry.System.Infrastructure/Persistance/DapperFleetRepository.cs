@@ -2,147 +2,109 @@
 using Microsoft.Data.Sqlite;
 using EasyLogistics.Telemetry.System.Core.Interfaces;
 using EasyLogistics.Telemetry.System.Core.Models;
-using EasyLogistics.Telemetry.System.Core.Entities;
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Hosting; // PRO: Use generic Hosting Abstractions
+using Microsoft.Extensions.Hosting;
 
 namespace EasyLogistics.Telemetry.System.Infrastructure.Persistence;
 
 public sealed class DapperFleetRepository : IFleetRepository
 {
     private readonly string _connectionString;
-    private readonly ILogger<DapperFleetRepository> _logger;
 
-    // Use IHostEnvironment instead of IWebHostEnvironment for Infrastructure purity
-    public DapperFleetRepository(IConfiguration config, ILogger<DapperFleetRepository> logger, IHostEnvironment env)
+    public DapperFleetRepository(IConfiguration config, IHostEnvironment env)
     {
-        _logger = logger;
-
-        // PRO: Resolve DB path relative to ContentRoot
-        string dbPath = Path.Combine(env.ContentRootPath, "EasyLogistics.db");
+        string dbPath = Path.Combine(env.ContentRootPath, "data", "EasyLogistics.db");
         _connectionString = $"Data Source={dbPath};Cache=Shared";
-
-        InitializeDatabase();
     }
 
-    public void InitializeDatabase()
+    public async Task<IEnumerable<TruckDisplayVm>> GetLatestPositionsAsync()
     {
-        try
-        {
-            using var conn = new SqliteConnection(_connectionString);
-            conn.Open();
+        using var conn = new SqliteConnection(_connectionString);
+        const string sql = @"
+            SELECT h.*, t.Vin as DriverName 
+            FROM (
+                SELECT *, ROW_NUMBER() OVER (PARTITION BY TruckId ORDER BY Timestamp DESC) as rn
+                FROM TruckHistory
+            ) h
+            LEFT JOIN Trucks t ON h.TruckId = t.Id
+            WHERE h.rn = 1";
 
-            // WAL mode for high-frequency writes
-            conn.Execute("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;");
-
-            // 1. Current State
-            conn.Execute(@"
-                CREATE TABLE IF NOT EXISTS Trucks (
-                    TruckId INTEGER PRIMARY KEY,
-                    Latitude REAL NOT NULL,
-                    Longitude REAL NOT NULL,
-                    Speed REAL NOT NULL,
-                    Status TEXT NOT NULL,
-                    FuelConsumed REAL NOT NULL,
-                    DistanceTraveled REAL NOT NULL,
-                    TotalCost REAL NOT NULL,
-                    LastUpdated TEXT NOT NULL,
-                    OriginLat REAL, OriginLon REAL,
-                    TargetLat REAL, TargetLon REAL
-                );");
-
-            // 2. Telemetry History
-            conn.Execute(@"
-                CREATE TABLE IF NOT EXISTS TruckHistory (
-                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    TruckId INTEGER NOT NULL,
-                    Latitude REAL NOT NULL,
-                    Longitude REAL NOT NULL,
-                    Speed REAL NOT NULL,
-                    FuelConsumed REAL NOT NULL,
-                    DistanceTraveled REAL NOT NULL,
-                    TotalCost REAL NOT NULL,
-                    Timestamp INTEGER NOT NULL
-                );
-                CREATE INDEX IF NOT EXISTS IX_TruckHistory_Lookup ON TruckHistory(TruckId, Timestamp DESC);");
-
-            // 3. Identity
-            conn.Execute(@"
-                CREATE TABLE IF NOT EXISTS AspNetUsers (
-                    Id TEXT PRIMARY KEY,
-                    UserName TEXT,
-                    NormalizedUserName TEXT,
-                    Email TEXT,
-                    NormalizedEmail TEXT,
-                    PasswordHash TEXT,
-                    FirstName TEXT,
-                    LastName TEXT,
-                    JoinedDate TEXT,
-                    IsActive INTEGER
-                );");
-
-            SeedInitialFleet(conn);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogCritical(ex, "FATAL: Database initialization failed.");
-        }
+        var rawData = await conn.QueryAsync<dynamic>(sql);
+        return rawData.Select(d => MapDynamicToVm(d)).Cast<TruckDisplayVm>().ToList();
     }
 
-    private void SeedInitialFleet(SqliteConnection conn)
+    public async Task<IEnumerable<TruckDisplayVm>> GetHistoryByIdAsync(int truckId)
     {
-        var count = conn.ExecuteScalar<int>("SELECT COUNT(*) FROM Trucks");
-        if (count == 0)
-        {
-            conn.Execute(@"
-                INSERT INTO Trucks (TruckId, Latitude, Longitude, Speed, Status, FuelConsumed, DistanceTraveled, TotalCost, LastUpdated)
-                VALUES (1, 44.8186, 20.4689, 0, 'Idle', 0, 0, 0, datetime('now'))");
-            _logger.LogInformation("🌱 Database Seeded: Initial fleet state created.");
-        }
+        using var conn = new SqliteConnection(_connectionString);
+        
+        var rawData = await conn.QueryAsync<dynamic>(
+            "SELECT * FROM TruckHistory WHERE TruckId = @truckId ORDER BY Timestamp DESC LIMIT 50",
+            new { truckId });
+
+        return rawData.Select(d => MapDynamicToVm(d)).Cast<TruckDisplayVm>().ToList();
     }
 
     public async Task SaveSnapshotAsync(IEnumerable<TruckTelemetry> fleet)
     {
-        if (fleet == null || !fleet.Any()) return;
+        using var conn = new SqliteConnection(_connectionString);
 
         const string sql = @"
-            INSERT INTO TruckHistory (TruckId, Latitude, Longitude, Speed, FuelConsumed, DistanceTraveled, TotalCost, Timestamp)
-            VALUES (@TruckId, @Latitude, @Longitude, @Speed, @FuelConsumed, @DistanceTraveled, @TotalCost, @Timestamp)";
-
-        using var conn = new SqliteConnection(_connectionString);
-        await conn.OpenAsync();
-        using var transaction = conn.BeginTransaction();
+        INSERT INTO TruckHistory (
+            TruckId, Latitude, Longitude, Speed, 
+            FuelConsumed, DistanceTraveled, TotalCost, Timestamp
+        )
+        VALUES (
+            @TruckId, @Latitude, @Longitude, @Speed, 
+            @FuelConsumed, @DistanceTraveled, @TotalCost, @Timestamp
+        )";
 
         try
         {
-            await conn.ExecuteAsync(sql, fleet, transaction);
-            await transaction.CommitAsync();
+            var parameters = fleet.Select(t => new {
+                TruckId = t.TruckId,
+                Latitude = t.Latitude,
+                Longitude = t.Longitude,
+                Speed = t.Speed,
+                FuelConsumed = t.FuelConsumed,
+                DistanceTraveled = t.DistanceTraveled,
+                TotalCost = t.TotalCost,
+                Timestamp = t.Timestamp
+            }).ToList();
+
+            await conn.ExecuteAsync(sql, parameters);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[DB] Snapshot batch write failed.");
-            await transaction.RollbackAsync();
+            Console.WriteLine($">>>> ❌ DATABASE INSERT ERROR: {ex.Message}");
         }
     }
 
-    public async Task<IEnumerable<TruckTelemetry>> GetLatestPositionsAsync()
+    private TruckDisplayVm MapDynamicToVm(dynamic d)
     {
-        using var conn = new SqliteConnection(_connectionString);
-        const string sql = @"
-            SELECT TruckId, Latitude, Longitude, Speed, FuelConsumed, DistanceTraveled, TotalCost, Timestamp
-            FROM (
-                SELECT *, ROW_NUMBER() OVER (PARTITION BY TruckId ORDER BY Timestamp DESC) as rn
-                FROM TruckHistory
-            ) WHERE rn = 1";
+        // SAFE CONVERSION LOGIC (Prevents InvalidCastException from dynamic)
+        long ticks = d.Timestamp != null ? (long)d.Timestamp : 0;
+        double speed = d.Speed != null ? Convert.ToDouble(d.Speed) : 0.0;
 
-        return await conn.QueryAsync<TruckTelemetry>(sql);
-    }
+        return new TruckDisplayVm
+        {
+            TruckId = d.TruckId != null ? Convert.ToInt32(d.TruckId) : 0,
+            Latitude = d.Latitude != null ? Convert.ToDouble(d.Latitude) : 0.0,
+            Longitude = d.Longitude != null ? Convert.ToDouble(d.Longitude) : 0.0,
+            Speed = speed,
+            FuelConsumed = d.FuelConsumed != null ? Convert.ToDouble(d.FuelConsumed) : 0.0,
+            DistanceTraveled = d.DistanceTraveled != null ? Convert.ToDouble(d.DistanceTraveled) : 0.0,
+            TotalCost = d.TotalCost != null ? Convert.ToDouble(d.TotalCost) : 0.0,
+            Timestamp = ticks,
 
-    public async Task<IEnumerable<TruckTelemetry>> GetHistoryByIdAsync(int truckId)
-    {
-        using var conn = new SqliteConnection(_connectionString);
-        const string sql = "SELECT * FROM TruckHistory WHERE TruckId = @truckId ORDER BY Timestamp DESC LIMIT 100";
-        return await conn.QueryAsync<TruckTelemetry>(sql, new { truckId });
+            // AI Analysis Logic
+            DriverName = d.DriverName ?? $"UNIT_{d.TruckId}",
+            LastUpdated = ticks > 0
+                ? new DateTime(ticks, DateTimeKind.Utc).ToLocalTime().ToString("HH:mm:ss")
+                : DateTime.Now.ToString("HH:mm:ss"),
+
+            AiStatus = speed > 85 ? "CRITICAL: OVERSPEED" : "NOMINAL: STEADY",
+            SeverityClass = speed > 85 ? "text-danger fw-bold blink" : "text-success",
+            Status = speed > 0 ? "In Transit" : "Stationary"
+        };
     }
 }

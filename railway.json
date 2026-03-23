@@ -1,0 +1,12 @@
+{
+  "$schema": "https://railway.app/railway.schema.json",
+  "build": {
+    "dockerfilePath": "Dockerfile.dotnet"
+  },
+  "deploy": {
+    "startCommand": "sh -c 'python3 ./engine/engine.py & dotnet EasyLogistics.Telemetry.System.Web.dll'",
+    "healthcheckPath": "/health",
+    "restartPolicyType": "ON_FAILURE",
+    "numReplicas": 1
+  }
+}

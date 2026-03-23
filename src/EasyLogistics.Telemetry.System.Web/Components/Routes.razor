@@ -1,24 +1,25 @@
-﻿@using Microsoft.AspNetCore.Components.Authorization
+﻿@using EasyLogistics.Telemetry.System.Web.Components.Layout
 
 <CascadingAuthenticationState>
     <Router AppAssembly="@typeof(Program).Assembly">
         <Found Context="routeData">
-            @* This component checks the user status for every page transition *@
-            <AuthorizeRouteView RouteData="@routeData" DefaultLayout="@typeof(Layout.MainLayout)">
+            <AuthorizeRouteView RouteData="@routeData" DefaultLayout="@typeof(MainLayout)">
                 <NotAuthorized>
-                    @* If the user is not logged in, we force them to the login page *@
                     <RedirectToLogin />
                 </NotAuthorized>
-                <Authorizing>
-                    <div class="p-4 text-center">Verifying Fleet Credentials...</div>
-                </Authorizing>
             </AuthorizeRouteView>
-            <FocusOnNavigate RouteData="@routeData" Selector="h1" />
         </Found>
         <NotFound>
             <PageTitle>Not found</PageTitle>
-            <LayoutView Layout="@typeof(Layout.MainLayout)">
-                <p role="alert">Sorry, there's nothing at this address.</p>
+            <LayoutView Layout="@typeof(MainLayout)">
+                <div class="container mt-5">
+                    <div class="alert alert-danger shadow-sm bg-black border-danger text-danger">
+                        <h4 class="fw-bold"><i class="bi bi-exclamation-octagon me-2"></i>404 - TERMINAL OFFLINE</h4>
+                        <p>The requested telemetry module or page does not exist on this server.</p>
+                        <hr class="border-danger">
+                        <a href="/" class="btn btn-outline-danger btn-sm">Return to Command</a>
+                    </div>
+                </div>
             </LayoutView>
         </NotFound>
     </Router>

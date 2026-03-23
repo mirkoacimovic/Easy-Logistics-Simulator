@@ -17,7 +17,9 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EasyLogistics.Telemetry.Sys
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "EasyLogistics.Telemetry.System.Engine", "EasyLogistics.Telemetry.System.Engine", "{02EA681E-C7D8-13C7-8484-4AC65E1B71E8}"
 	ProjectSection(SolutionItems) = preProject
-		src\EasyLogistics.Telemetry.System.Engine\telemetry_engine.py = src\EasyLogistics.Telemetry.System.Engine\telemetry_engine.py
+		src\EasyLogistics.Telemetry.System.Engine\bootstrap.sh = src\EasyLogistics.Telemetry.System.Engine\bootstrap.sh
+		src\EasyLogistics.Telemetry.System.Engine\engine.py = src\EasyLogistics.Telemetry.System.Engine\engine.py
+		src\EasyLogistics.Telemetry.System.Engine\requirements.txt = src\EasyLogistics.Telemetry.System.Engine\requirements.txt
 	EndProjectSection
 EndProject
 Global

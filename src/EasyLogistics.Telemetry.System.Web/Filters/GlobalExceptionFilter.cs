@@ -11,12 +11,25 @@ public class GlobalExceptionFilter : IExceptionFilter
 
     public void OnException(ExceptionContext context)
     {
-        _logger.LogError(context.Exception, "An unhandled exception occurred.");
+        // Log the full stack trace for Belgrade debugging
+        _logger.LogError(context.Exception, ">>>> 🚨 BRIDGE_FAULT: {Message}", context.Exception.Message);
 
-        context.Result = new ObjectResult(new { error = "Internal Server Error" })
+        var errorResponse = new
         {
-            StatusCode = 500
+            error = "INTERNAL_SYSTEM_FAILURE",
+            detail = context.Exception.Message,
+            timestamp = DateTime.Now.ToString("HH:mm:ss"),
+            isBridgeError = context.Exception is IOException || context.Exception is UnauthorizedAccessException
         };
+
+        // If it's a Bridge error (MMF missing), we might return a 503 Service Unavailable
+        int statusCode = errorResponse.isBridgeError ? 503 : 500;
+
+        context.Result = new ObjectResult(errorResponse)
+        {
+            StatusCode = statusCode
+        };
+
         context.ExceptionHandled = true;
     }
 }

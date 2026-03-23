@@ -1,114 +1,151 @@
-﻿using System.Data;
-using System.Runtime.Versioning;
-using EasyLogistics.Telemetry.System.Core.Configuration;
+﻿using EasyLogistics.Telemetry.System.Core.Configuration;
 using EasyLogistics.Telemetry.System.Core.Entities;
 using EasyLogistics.Telemetry.System.Core.Interfaces;
-using EasyLogistics.Telemetry.System.Infrastructure;
+using EasyLogistics.Telemetry.System.Infrastructure.Bridge;
+using EasyLogistics.Telemetry.System.Infrastructure.Health;
 using EasyLogistics.Telemetry.System.Infrastructure.Persistence;
 using EasyLogistics.Telemetry.System.Infrastructure.Services;
 using EasyLogistics.Telemetry.System.Infrastructure.Workers;
 using EasyLogistics.Telemetry.System.Web.Components;
+using EasyLogistics.Telemetry.System.Web.Filters;
 using EasyLogistics.Telemetry.System.Web.Hubs;
-using EasyLogistics.Telemetry.System.Web.Services;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Data.Sqlite;
 using Serilog;
+using System.Data;
 
-[assembly: SupportedOSPlatform("windows")]
+// Immediate feedback for Docker/Console logs
+Console.WriteLine(">>>> 🚛 EASYLOGISTICS: BOOT SEQUENCE INITIATED <<<<");
 
 var builder = WebApplication.CreateBuilder(args);
 
-// --- 1. PRO LOGGING (Serilog) ---
-Log.Logger = new LoggerConfiguration()
-    .ReadFrom.Configuration(builder.Configuration)
-    .Enrich.FromLogContext()
-    .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}")
-    .CreateLogger();
+// 1. HIGH-PERFORMANCE LOGGING
+builder.Host.UseSerilog((ctx, lc) => lc.ReadFrom.Configuration(ctx.Configuration));
 
-builder.Host.UseSerilog();
+// 2. CONFIGURATION & CORE PLUMBING
+builder.Services.Configure<FleetSettings>(builder.Configuration.GetSection("FleetSettings"));
+builder.Services.AddDataProtection();
 
-// --- 2. INFRASTRUCTURE & DATABASE ---
-string dbPath = Path.Combine(builder.Environment.ContentRootPath, "EasyLogistics.db");
-string connectionString = $"Data Source={dbPath};Cache=Shared";
+// 🚀 PERSISTENCE: Use the shared Volume Path
+string dbPath = "/app/data/EasyLogistics.db";
+var dbDirectory = Path.GetDirectoryName(dbPath);
+if (!string.IsNullOrEmpty(dbDirectory)) Directory.CreateDirectory(dbDirectory);
 
-builder.Services.AddTransient<IDbConnection>(_ => new SqliteConnection(connectionString));
+builder.Services.AddTransient<IDbConnection>(sp =>
+    new SqliteConnection($"Data Source={dbPath};Cache=Shared"));
 
-// PRO: Bind the JSON "FleetEngine" section to the FleetSettings class
-builder.Services.Configure<FleetSettings>(builder.Configuration.GetSection("FleetEngine"));
+builder.Services.AddScoped<IFleetRepository, DapperFleetRepository>();
+builder.Services.AddScoped<IUserStore<ApplicationUser>, DapperUserStore>();
 
-builder.Services.AddFleetInfrastructure();
-builder.Services.AddSingleton<ITriageService, AiTriageService>();
-
-// --- 3. IDENTITY & AUTHENTICATION ---
+// 3. IDENTITY & SECURITY
 builder.Services.AddCascadingAuthenticationState();
-builder.Services.AddHttpContextAccessor();
-builder.Services.AddAuthentication(IdentityConstants.ApplicationScheme).AddIdentityCookies();
+builder.Services.AddAuthentication(IdentityConstants.ApplicationScheme)
+    .AddIdentityCookies(options => {
+        options.ApplicationCookie?.Configure(c => {
+            c.LoginPath = "/login";
+            c.Cookie.Name = "EasyLogistics.Auth.Token";
+            c.Cookie.HttpOnly = true;
+            c.ExpireTimeSpan = TimeSpan.FromDays(7);
+        });
+    });
 
 builder.Services.AddIdentityCore<ApplicationUser>()
     .AddSignInManager()
     .AddDefaultTokenProviders();
 
-builder.Services.AddScoped<IUserStore<ApplicationUser>, DapperUserStore>();
-builder.Services.AddScoped<IUserPasswordStore<ApplicationUser>, DapperUserStore>();
-builder.Services.AddScoped<IUserEmailStore<ApplicationUser>, DapperUserStore>();
-
-builder.Services.ConfigureApplicationCookie(options => {
-    options.Cookie.Name = "Fleet.Auth";
-    options.LoginPath = "/login";
-    options.Cookie.HttpOnly = true;
-    options.Cookie.SameSite = SameSiteMode.Lax;
-    options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
-});
-
-builder.Services.AddAuthorization(options => {
-    options.FallbackPolicy = new AuthorizationPolicyBuilder()
-        .RequireAuthenticatedUser()
-        .Build();
-});
-
-// --- 4. SIGNALR & BLAZOR ---
-builder.Services.AddAntiforgery();
+// 4. UI, REAL-TIME & FILTERS
 builder.Services.AddRazorComponents().AddInteractiveServerComponents();
+builder.Services.AddSignalR();
 
-builder.Services.AddSignalR(o => {
-    o.EnableDetailedErrors = builder.Environment.IsDevelopment();
+builder.Services.AddControllers(options => {
+    options.Filters.Add<GlobalExceptionFilter>();
 });
 
-builder.Services.AddSingleton<IFleetHubNotifier, FleetHubNotifier>();
+builder.Services.AddServerSideBlazor().AddCircuitOptions(options => {
+    options.DetailedErrors = true;
+});
+
+// 5. INFRASTRUCTURE SINGLETONS
+builder.Services.AddSingleton<IFleetStateService, FleetStateService>();
+builder.Services.AddSingleton<IFleetBridge, MemoryMappedBridge>();
 builder.Services.AddHostedService<FleetWorker>();
-builder.Services.AddScoped<SignalRClientService>();
+
+// 6. HEALTH MONITORING
+builder.Services.AddHealthChecks().AddCheck<BridgeHealthCheck>("python_bridge_check");
+
+// 🚀 PORT BINDING: Respect Railway Environment
+var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
+builder.WebHost.UseUrls($"http://*:{port}");
 
 var app = builder.Build();
 
-// --- 5. INITIALIZATION ---
-await using (var scope = app.Services.CreateAsyncScope())
+// 🚀 PROXY FIX: Trust Railway's X-Forwarded Headers
+app.UseForwardedHeaders(new ForwardedHeadersOptions
 {
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
+});
+
+// 7. DATABASE SCHEMA & SEEDING
+using (var scope = app.Services.CreateScope())
+{
+    var services = scope.ServiceProvider;
     try
     {
-        var repo = scope.ServiceProvider.GetRequiredService<IFleetRepository>();
-        if (repo is DapperFleetRepository dapperRepo) dapperRepo.InitializeDatabase();
+        Console.WriteLine(">>>> 🛠️  PLUMBING: Initializing UserStore...");
+        var userStore = (DapperUserStore)services.GetRequiredService<IUserStore<ApplicationUser>>();
+        await userStore.EnsureSchemaAsync();
 
-        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        Console.WriteLine(">>>> 🛠️  PLUMBING: Validating Admin Identity...");
+        var userManager = services.GetRequiredService<UserManager<ApplicationUser>>();
         await IdentitySeeder.SeedAdminUser(userManager);
-        Log.Information("✅ System Ready: Database and Admin verified.");
+
+        Console.WriteLine(">>>> 🛠️  PLUMBING: Syncing Truck Master Data...");
+        using var db = services.GetRequiredService<IDbConnection>();
+        await TruckSeeder.SeedTrucks(db);
+
+        Console.WriteLine(">>>> ✅ PLUMBING: System Core Ready.");
     }
-    catch (Exception ex) { Log.Fatal(ex, "Initialization failed."); }
+    catch (Exception ex)
+    {
+        Console.WriteLine($">>>> ❌ PLUMBING CRITICAL FAILURE: {ex.Message}");
+    }
 }
 
-// --- 6. MIDDLEWARE ---
-if (!app.Environment.IsDevelopment()) app.UseHsts();
-app.UseHttpsRedirection();
-app.MapStaticAssets();
+// 8. MIDDLEWARE PIPELINE
+if (!app.Environment.IsDevelopment())
+{
+    app.UseExceptionHandler("/Error", createScopeForErrors: true);
+    app.UseHsts();
+}
+
 app.UseStaticFiles();
-app.UseRouting();
+app.UseAntiforgery();
 app.UseAuthentication();
 app.UseAuthorization();
-app.UseAntiforgery();
 
-// --- 7. ENDPOINTS ---
-app.MapHub<FleetHub>("/fleethub");
+// 9. ENDPOINT MAPPING
+app.MapHealthChecks("/health");
+
+// 🚀 SIGNALR FIX: Allow Long-Polling for proxy stability
+app.MapHub<FleetHub>("/fleethub", options => {
+    options.Transports = Microsoft.AspNetCore.Http.Connections.HttpTransportType.WebSockets |
+                         Microsoft.AspNetCore.Http.Connections.HttpTransportType.LongPolling;
+});
+
 app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
+app.MapControllers();
 
-Log.Information("🚀 FLEET ENGINE ONLINE | Port: 7000");
+// Auth Minimal APIs
+app.MapPost("/auth/login-endpoint", async ([FromForm] string email, [FromForm] string password, SignInManager<ApplicationUser> sm) => {
+    var result = await sm.PasswordSignInAsync(email, password, true, false);
+    return result.Succeeded ? Results.Redirect("/") : Results.Redirect("/login?error=1");
+});
+
+app.MapPost("/logout", async (SignInManager<ApplicationUser> sm) => {
+    await sm.SignOutAsync();
+    return Results.Redirect("/login");
+}).AllowAnonymous();
+
 app.Run();

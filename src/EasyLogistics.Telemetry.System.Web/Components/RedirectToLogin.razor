@@ -1,7 +1,10 @@
 ﻿@inject NavigationManager Navigation
+
 @code {
     protected override void OnInitialized()
     {
-        Navigation.NavigateTo("login");
+        // ForceLoad: true is critical to ensure the server-side
+        // identity cookies are handled correctly.
+        Navigation.NavigateTo("login", forceLoad: true);
     }
 }

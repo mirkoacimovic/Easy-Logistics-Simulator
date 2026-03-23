@@ -1,5 +1,6 @@
 ﻿@using global::System.Net.Http
 @using global::System.Net.Http.Json
+@using Microsoft.AspNetCore.Components.Authorization
 @using Microsoft.AspNetCore.Components.Forms
 @using Microsoft.AspNetCore.Components.Routing
 @using Microsoft.AspNetCore.Components.Web
@@ -8,8 +9,7 @@
 @using Microsoft.JSInterop
 @using EasyLogistics.Telemetry.System.Web
 @using EasyLogistics.Telemetry.System.Web.Components
-@using EasyLogistics.Telemetry.System.Web.Services
+@using EasyLogistics.Telemetry.System.Web.Components.Layout
 @using Microsoft.AspNetCore.Authorization
 
-@* LOCKS EVERY PAGE IN THE PROJECT BY DEFAULT *@
 @attribute [Authorize]

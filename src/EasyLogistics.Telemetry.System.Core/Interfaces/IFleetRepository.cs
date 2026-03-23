@@ -5,6 +5,6 @@ namespace EasyLogistics.Telemetry.System.Core.Interfaces;
 public interface IFleetRepository
 {
     Task SaveSnapshotAsync(IEnumerable<TruckTelemetry> fleet);
-    Task<IEnumerable<TruckTelemetry>> GetHistoryByIdAsync(int truckId);
-    Task<IEnumerable<TruckTelemetry>> GetLatestPositionsAsync();
+    Task<IEnumerable<TruckDisplayVm>> GetLatestPositionsAsync();
+    Task<IEnumerable<TruckDisplayVm>> GetHistoryByIdAsync(int truckId);
 }

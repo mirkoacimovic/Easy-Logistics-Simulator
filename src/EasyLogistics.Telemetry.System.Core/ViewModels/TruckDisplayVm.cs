@@ -1,10 +1,7 @@
-﻿using System;
-
-namespace EasyLogistics.Telemetry.System.Core.Models;
+﻿namespace EasyLogistics.Telemetry.System.Core.Models;
 
 public class TruckDisplayVm
 {
-    // --- CORE PROPERTIES ---
     public int TruckId { get; set; }
     public double Latitude { get; set; }
     public double Longitude { get; set; }
@@ -12,31 +9,12 @@ public class TruckDisplayVm
     public double FuelConsumed { get; set; }
     public double DistanceTraveled { get; set; }
     public double TotalCost { get; set; }
-    public string Status { get; set; } = "Active";
-    public DateTime LastUpdated { get; set; } = DateTime.Now;
+    public long Timestamp { get; set; }
 
-    // --- PHASE 4: ROUTE PROPERTIES ---
-    public string RouteName { get; set; } = "Initializing...";
-
-    // --- UI ALIASES ---
-    public int Id { get => TruckId; set => TruckId = value; }
-    public double Lat { get => Latitude; set => Latitude = value; }
-    public double Lng { get => Longitude; set => Longitude = value; }
-    public double Fuel { get => FuelConsumed; set => FuelConsumed = value; }
-    public double Distance { get => DistanceTraveled; set => DistanceTraveled = value; }
-    public double Cost { get => TotalCost; set => TotalCost = value; }
-
-    // --- DISPLAY HELPERS ---
-    public string DisplayId => $"TRK-{TruckId:D3}";
-    public string SpeedDisplay => $"{Speed:F1} km/h";
-    public string FuelDisplay => $"{FuelConsumed:F2} L";
-    public string DistanceDisplay => $"{DistanceTraveled:N1} km";
-    public string CostDisplay => $"€{TotalCost:N2}";
-
-    public string StatusClass => Status switch
-    {
-        "Moving" => "success",
-        "Idle" => "secondary",
-        _ => "info"
-    };
+    // UI Logic
+    public string Status { get; set; } = "Stationary";
+    public string LastUpdated { get; set; } = "";
+    public string AiStatus { get; set; } = "NOMINAL";
+    public string SeverityClass { get; set; } = "text-success";
+    public string DriverName { get; set; } = "Unknown";
 }

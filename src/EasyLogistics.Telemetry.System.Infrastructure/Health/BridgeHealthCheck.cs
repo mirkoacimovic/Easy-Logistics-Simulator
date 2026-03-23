@@ -11,15 +11,14 @@ public class BridgeHealthCheck : IHealthCheck
 
     public Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken ct = default)
     {
-        try
+        var data = _bridge.ReadFleet();
+
+        if (data.Any())
         {
-            // Try a test read
-            _bridge.ReadFleet();
-            return Task.FromResult(HealthCheckResult.Healthy("Memory Map Bridge is responding."));
+            return Task.FromResult(HealthCheckResult.Healthy($"Bridge Online: {data.Length} units reporting."));
         }
-        catch
-        {
-            return Task.FromResult(HealthCheckResult.Unhealthy("Memory Map Bridge is disconnected."));
-        }
+
+        // If data is empty, it means EnsureInitialized() failed or the engine is idling
+        return Task.FromResult(HealthCheckResult.Degraded("Bridge Offline: Waiting for Python Engine SHM..."));
     }
 }

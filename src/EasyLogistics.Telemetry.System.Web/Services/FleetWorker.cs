@@ -1,74 +1,80 @@
-﻿using EasyLogistics.Telemetry.System.Core.Configuration;
-using EasyLogistics.Telemetry.System.Core.Interfaces;
+﻿using EasyLogistics.Telemetry.System.Core.Interfaces;
 using EasyLogistics.Telemetry.System.Web.Hubs;
 using Microsoft.AspNetCore.SignalR;
-using Microsoft.Extensions.Options;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 
 namespace EasyLogistics.Telemetry.System.Infrastructure.Workers;
 
-public class FleetWorker : BackgroundService
+public sealed class FleetWorker : BackgroundService
 {
-    private readonly IHubContext<FleetHub> _hubContext;
+    private readonly ILogger<FleetWorker> _logger;
     private readonly IFleetBridge _bridge;
     private readonly IFleetStateService _stateService;
-    private readonly FleetSettings _settings;
-    private readonly ILogger<FleetWorker> _logger;
+    private readonly IHubContext<FleetHub> _hubContext;
+    private readonly IServiceProvider _serviceProvider;
+    private int _tickCounter = 0;
 
     public FleetWorker(
-        IHubContext<FleetHub> hubContext,
+        ILogger<FleetWorker> logger,
         IFleetBridge bridge,
         IFleetStateService stateService,
-        IOptions<FleetSettings> settings,
-        ILogger<FleetWorker> logger)
+        IHubContext<FleetHub> hubContext,
+        IServiceProvider serviceProvider)
     {
-        _hubContext = hubContext;
+        _logger = logger;
         _bridge = bridge;
         _stateService = stateService;
-        _settings = settings.Value;
-        _logger = logger;
+        _hubContext = hubContext;
+        _serviceProvider = serviceProvider;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("🚛 FleetWorker Loop Started. Target MMF: {ShmName}", _settings.ShmName);
-
-        // Calculate frequency based on Hz configuration
-        var delayMs = 1000 / (_settings.RefreshRateHz > 0 ? _settings.RefreshRateHz : 1);
+        // Wait for Python Engine to map the Memory File
+        await Task.Delay(3000, stoppingToken);
+        _logger.LogInformation("🚛 FLEET PULSE ONLINE: Persistence loop starting.");
 
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                // 1. Read raw bytes from Python-generated Shared Memory
-                var snapshots = _bridge.ReadFleet();
+                var rawData = _bridge.ReadFleet();
+                var activeTrucks = rawData?.Where(t => t.TruckId > 0).ToList();
 
-                if (snapshots != null && snapshots.Any())
+                if (activeTrucks != null && activeTrucks.Any())
                 {
-                    // 2. Process logic (Route resolution, Speed status)
-                    await _stateService.UpdateFleet(snapshots);
+                    // VITAL: Standardize the Timestamp for all trucks in this 'pulse'
+                    long currentTicks = DateTime.UtcNow.Ticks;
+                    activeTrucks.ForEach(t => t.Timestamp = DateTime.UtcNow.Ticks);
 
-                    // 3. Retrieve the ViewModels (TruckDisplayVm)
-                    var updatedFleet = _stateService.GetFormattedFleet();
+                    // 1. UI Broadcast (Immediate Real-time)
+                    await _stateService.UpdateFleet(activeTrucks);
+                    var displayFleet = _stateService.GetFormattedFleet();
+                    await _hubContext.Clients.All.SendAsync("ReceiveFleetUpdate", displayFleet, stoppingToken);
 
-                    // 4. Broadcast to SignalR Hub
-                    await _hubContext.Clients.All.SendAsync(
-                        "ReceiveFleetUpdate",
-                        updatedFleet,
-                        cancellationToken: stoppingToken);
+                    // 2. Persistence (Tick = 500ms, Save = 5000ms)
+                    _tickCounter++;
+                    if (_tickCounter >= 10)
+                    {
+                        using (var scope = _serviceProvider.CreateScope())
+                        {
+                            var repository = scope.ServiceProvider.GetRequiredService<IFleetRepository>();
+
+                            // This saves the data that populates your History/AI page
+                            await repository.SaveSnapshotAsync(activeTrucks);
+
+                            // High-visibility marker for monitoring performance
+                            Console.WriteLine($">>>> 💾 PERSISTENCE: Saved {activeTrucks.Count} rows at {DateTime.Now:HH:mm:ss}");
+                        }
+                        _tickCounter = 0;
+                    }
                 }
-            }
-            catch (OperationCanceledException)
-            {
-                _logger.LogInformation("FleetWorker is shutting down gracefully.");
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Critical error in FleetWorker loop.");
+                _logger.LogError(ex, "Telemetry Loop Error.");
             }
 
-            await Task.Delay(delayMs, stoppingToken);
+            await Task.Delay(500, stoppingToken);
         }
     }
 }

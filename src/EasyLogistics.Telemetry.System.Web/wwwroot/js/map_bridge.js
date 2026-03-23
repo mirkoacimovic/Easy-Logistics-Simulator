@@ -3,6 +3,11 @@ var markers = {};
 
 window.mapBridge = {
     initMap: function (elementId) {
+        if (map) return; // Stop the double-init crash
+
+        const container = document.getElementById(elementId);
+        if (!container) return;
+
         // Center on Europe hubs
         map = L.map(elementId).setView([48.8566, 10.3522], 5);
 
@@ -12,13 +17,16 @@ window.mapBridge = {
     },
 
     updateMarkers: function (trucks) {
+        if (!this.map) {
+            console.warn("📍 [MAP] Update ignored: Map not initialized yet.");
+            return;
+        }
+
         trucks.forEach(truck => {
             if (markers[truck.truckId]) {
-                // Smoothly move existing marker
                 markers[truck.truckId].setLatLng([truck.latitude, truck.longitude]);
                 markers[truck.truckId].setTooltipContent(`Truck #${truck.truckId}<br>${truck.speed.toFixed(1)} km/h`);
             } else {
-                // Create new marker
                 markers[truck.truckId] = L.circleMarker([truck.latitude, truck.longitude], {
                     radius: 6,
                     fillColor: "#ff7800",
