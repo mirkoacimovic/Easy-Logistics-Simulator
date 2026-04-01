@@ -31,6 +31,12 @@ Worker: Python 3.12 (Asyncio) for high-frequency data simulation.
 DevOps: Docker, Multi-stage builds, Environment Injection.
 Principles: SOLID, Clean Architecture, Repository Pattern.
 
+🗺️ System Architecture
+
+Overview
+
+<img width="932" height="469" alt="image" src="https://github.com/user-attachments/assets/afc733a5-9432-4a1b-a500-94626547e33f" />
+
 📈 Roadmap
 
 ✅ Phase 1: Identity Cleanup (Core Identity Logic).
