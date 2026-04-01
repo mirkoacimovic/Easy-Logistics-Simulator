@@ -11,6 +11,7 @@ The Engine (Python): An asynchronous worker service that simulates high-frequenc
 The Infrastructure: Containerized via Docker with multi-stage builds optimized for cloud-native deployment (Railway/Vercel).
 
 🔄 System Orchestration & IPC
+
 The architecture employs a Polyglot Asynchronous Pattern. The .NET 9 Gateway acts as the Sovereign Orchestrator, utilizing C# 14 Memory-Safe Constructs to ingest high-frequency telemetry from the Python Engine. Communication is handled via Stateless RESTful Handshakes and Full-Duplex SignalR Streams, ensuring zero-latency visibility for the end-user.
 
 🚦 Live Demo & Access
